@@ -8,8 +8,9 @@ const somePubkey =
 Future<void> main() async {
   final db = await databaseFactoryMemory.openDatabase('sync_engine.db');
 
+  final cache = MemCacheManager();
   final ndk = Ndk(
-    NdkConfig(eventVerifier: Bip340EventVerifier(), cache: MemCacheManager()),
+    NdkConfig(eventVerifier: Bip340EventVerifier(), cache: cache),
   );
 
   final engine = SyncEngine(ndk, db: db);
@@ -24,13 +25,19 @@ Future<void> main() async {
     ),
   );
 
-  engine.watchStatus(handle).listen((status) {
-    print('sync phase: ${status.phase}');
-  });
+  await engine
+      .watchStatus(handle)
+      .firstWhere(
+        (status) =>
+            status.phase == SyncRequestPhase.synced ||
+            status.phase == SyncRequestPhase.failed,
+      );
 
   // Synced events land in the NDK cache, read them from there.
-  final notes = await ndk.requests.query(filter: filter).future;
+  final notes = await cache.loadEvents(kinds: [1], pubKeys: [somePubkey]);
   print('${notes.length} notes');
 
   engine.release(handle);
+  await engine.dispose();
+  ndk.destroy();
 }

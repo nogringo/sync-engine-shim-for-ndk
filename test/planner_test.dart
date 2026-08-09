@@ -80,7 +80,9 @@ void main() {
   test('plans the trailing window once it went stale', () {
     final since = ago(const Duration(days: 30));
     final lastFetch = ago(const Duration(hours: 2));
-    final state = stateWith([covered(since, lastFetch)]);
+    final state = stateWith([
+      covered(since, lastFetch, completedAt: lastFetch),
+    ]);
 
     final tasks = plan(
       Filter(kinds: [1], since: seconds(since)),
@@ -94,6 +96,53 @@ void main() {
         lastFetch.add(const Duration(seconds: 1)).subtract(overlapMargin),
       ),
     );
+    expect(tasks.single.filter.until, seconds(now));
+  });
+
+  test('plans nothing when coverage reaches now and is fresh', () {
+    final since = ago(const Duration(days: 30));
+    final state = stateWith([covered(since, now)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since)),
+      state: state,
+    );
+
+    expect(tasks, isEmpty);
+  });
+
+  test('revisits the recent end even when coverage reaches now', () {
+    final since = ago(const Duration(days: 30));
+    final state = stateWith([covered(since, now)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since)),
+      state: state,
+      staleness: Duration.zero,
+    );
+
+    expect(
+      tasks,
+      hasLength(1),
+      reason:
+          'there is no hole left, yet a refresh '
+          'must still go and look',
+    );
+    expect(tasks.single.filter.since, seconds(now.subtract(overlapMargin)));
+    expect(tasks.single.filter.until, seconds(now));
+  });
+
+  test('revisits the recent end once the coverage there went stale', () {
+    final since = ago(const Duration(days: 30));
+    final validatedAt = ago(const Duration(hours: 2));
+    final state = stateWith([covered(since, now, completedAt: validatedAt)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since)),
+      state: state,
+    );
+
+    expect(tasks, hasLength(1));
     expect(tasks.single.filter.until, seconds(now));
   });
 
