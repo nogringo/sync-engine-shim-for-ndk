@@ -17,11 +17,6 @@ class SyncEngine {
     this.overlapMargin = const Duration(days: 1),
   }) : store = SyncStore(db: db);
 
-  /// NIP-59 randomises a gift wrap's created_at up to two days into the past,
-  /// so a window on kind 1059 is widened by this much or those events are
-  /// missed for good.
-  static const giftWrapOverlap = Duration(days: 2);
-
   final Ndk ndk;
   final SyncStore store;
 
