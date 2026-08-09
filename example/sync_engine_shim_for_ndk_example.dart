@@ -1,14 +1,14 @@
 import 'package:ndk/ndk.dart';
-import 'package:sembast/sembast_memory.dart' hide Filter;
+import 'package:sembast/sembast_io.dart' hide Filter;
 import 'package:sync_engine_shim_for_ndk/sync_engine_shim_for_ndk.dart';
 
 const somePubkey =
     '56e8c688aabb49e9bb68f9d8d6722c809366ad1ad959042db45970cc63152d75';
 
 Future<void> main() async {
-  final db = await databaseFactoryMemory.openDatabase('sync_engine.db');
+  final db = await databaseFactoryIo.openDatabase('sync_engine.db');
 
-  final cache = MemCacheManager();
+  final cache = await SembastCacheManager.create(databasePath: '.');
   final ndk = Ndk(
     NdkConfig(eventVerifier: Bip340EventVerifier(), cache: cache),
   );
