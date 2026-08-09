@@ -38,4 +38,18 @@ class CoverageRange {
   /// Last known validation of this range. Merging two ranges keeps the oldest
   /// one, so the merge never claims freshness it does not have.
   final DateTime completedAt;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CoverageRange &&
+          from == other.from &&
+          to == other.to &&
+          completedAt == other.completedAt;
+
+  @override
+  int get hashCode => Object.hash(from, to, completedAt);
+
+  @override
+  String toString() => 'CoverageRange($from - $to, completed $completedAt)';
 }

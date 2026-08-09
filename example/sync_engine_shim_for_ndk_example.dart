@@ -9,10 +9,7 @@ Future<void> main() async {
   final db = await databaseFactoryMemory.openDatabase('sync_engine.db');
 
   final ndk = Ndk(
-    NdkConfig(
-      eventVerifier: Bip340EventVerifier(),
-      cache: MemCacheManager(),
-    ),
+    NdkConfig(eventVerifier: Bip340EventVerifier(), cache: MemCacheManager()),
   );
 
   final engine = SyncEngine(ndk, db: db);
