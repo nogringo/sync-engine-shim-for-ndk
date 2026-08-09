@@ -3,6 +3,11 @@ description: Downward sync engine for the ndk package. Declare what you need, th
 version: 0.1.0
 repository: https://github.com/nogringo/sync-engine-shim-for-ndk
 
+topics:
+  - nostr
+  - ndk
+  - sync
+
 environment:
   sdk: ^3.12.2
 
