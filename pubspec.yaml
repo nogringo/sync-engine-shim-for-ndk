@@ -7,6 +7,7 @@ environment:
   sdk: ^3.12.2
 
 dependencies:
+  crypto: ^3.0.7
   ndk: ^0.8.4-dev.10
   rxdart: ^0.28.0
   sembast: ^3.8.9+1
