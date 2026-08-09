@@ -27,6 +27,8 @@ class SyncEngine {
     required Database db,
     this.maxStaleness = const Duration(minutes: 5),
     this.overlapMargin = const Duration(days: 1),
+    this.initialBackoff = const Duration(seconds: 5),
+    this.maxBackoff = const Duration(minutes: 5),
   }) : store = SyncStore(db: db) {
     _runner = TaskRunner(ndk: ndk, store: store);
   }
@@ -40,6 +42,14 @@ class SyncEngine {
   /// How far back a new pass reaches beyond existing coverage, to absorb clock
   /// skew and late deliveries.
   final Duration overlapMargin;
+
+  /// Wait before going back to a relay that left something unanswered. It
+  /// doubles on every consecutive failure, up to [maxBackoff], and resets as
+  /// soon as that relay answers. Backoff is per relay: a dead relay slows down
+  /// on its own without holding back the others.
+  final Duration initialBackoff;
+
+  final Duration maxBackoff;
 
   late final TaskRunner _runner;
 
@@ -66,6 +76,12 @@ class SyncEngine {
   /// persisted state survive.
   Future<void> stop() async {
     _started = false;
+
+    for (final queue in _queues.values) {
+      queue.retry?.cancel();
+      queue.retry = null;
+    }
+
     await _inFlight();
     _publishEngineStatus();
   }
@@ -231,10 +247,8 @@ class SyncEngine {
   /// keyed by normalised url, otherwise two spellings would mean two queues,
   /// and two queries at once on a single relay.
   Future<bool> _enqueue(String relayUrl, Future<bool> Function() work) {
-    final queue = _queues.putIfAbsent(
-      cleanRelayUrl(relayUrl) ?? relayUrl,
-      _RelayQueue.new,
-    );
+    final key = cleanRelayUrl(relayUrl) ?? relayUrl;
+    final queue = _queues.putIfAbsent(key, () => _RelayQueue(key));
     final job = _Job(work);
 
     queue.jobs.add(job);
@@ -250,13 +264,48 @@ class SyncEngine {
     while (queue.jobs.isNotEmpty) {
       final job = queue.jobs.removeFirst();
       try {
-        job.done.complete(await job.work());
+        final answered = await job.work();
+        _noteAttempt(queue, answered: answered);
+        job.done.complete(answered);
       } catch (error, stackTrace) {
+        _noteAttempt(queue, answered: false);
         job.done.completeError(error, stackTrace);
       }
     }
 
     queue.busy = false;
+  }
+
+  /// A relay that answers clears its own backoff. One that does not gets a
+  /// wake up call, which re-runs every request wanting it.
+  void _noteAttempt(_RelayQueue queue, {required bool answered}) {
+    if (answered) {
+      queue.failures = 0;
+      queue.retry?.cancel();
+      queue.retry = null;
+      return;
+    }
+
+    queue.failures++;
+    if (queue.retry != null) return;
+
+    queue.retry = Timer(_backoffFor(queue.failures), () {
+      queue.retry = null;
+      for (final registration in _registrations.values) {
+        if (_relayKeysOf(registration.request).contains(queue.key)) {
+          unawaited(_sync(registration.handle.id));
+        }
+      }
+    });
+  }
+
+  Duration _backoffFor(int failures) {
+    var backoff = initialBackoff;
+    for (var i = 1; i < failures && backoff < maxBackoff; i++) {
+      backoff *= 2;
+    }
+
+    return backoff > maxBackoff ? maxBackoff : backoff;
   }
 
   Future<List<RelayFilterSyncState>> _statesOf(SyncRequest request) async {
@@ -324,13 +373,15 @@ class SyncEngine {
     final filters = [
       for (final filter in request.filters) filterFingerprint(filter),
     ]..sort();
-    final relays = [
-      for (final relay in request.relays) cleanRelayUrl(relay) ?? relay,
-    ]..sort();
+    final relays = _relayKeysOf(request).toList()..sort();
 
     return '${filters.join(',')}|${request.authPubkey ?? ''}|'
         '${relays.join(',')}';
   }
+
+  Set<String> _relayKeysOf(SyncRequest request) => {
+    for (final relay in request.relays) cleanRelayUrl(relay) ?? relay,
+  };
 
   BehaviorSubject<SyncRequestStatus> _subjectFor(SyncHandle handle) {
     final registration = _registrations[handle.id];
@@ -357,10 +408,21 @@ class _Registration {
   Future<void>? running;
 }
 
-/// Serialises the work aimed at one relay.
+/// Serialises the work aimed at one relay, and carries that relay's backoff.
+/// In memory only: a fresh start is an intention to try again now.
 class _RelayQueue {
+  _RelayQueue(this.key);
+
+  /// Normalised url of the relay.
+  final String key;
+
   final jobs = Queue<_Job>();
   var busy = false;
+
+  /// Consecutive failures on this relay, back to zero as soon as it answers.
+  var failures = 0;
+
+  Timer? retry;
 }
 
 class _Job {

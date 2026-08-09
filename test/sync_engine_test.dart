@@ -34,7 +34,12 @@ void main() {
     );
 
     final db = await newDatabaseFactoryMemory().openDatabase('sync_engine.db');
-    engine = SyncEngine(ndk, db: db);
+    engine = SyncEngine(
+      ndk,
+      db: db,
+      initialBackoff: const Duration(milliseconds: 200),
+      maxBackoff: const Duration(seconds: 1),
+    );
   });
 
   tearDown(() async {
@@ -190,6 +195,31 @@ void main() {
           'alone, ignoring explicitRelays. Only cacheRead being off keeps the '
           'second relay from silently receiving the first one\'s events.',
     );
+  });
+
+  test('retries a relay that was down, on its own', () async {
+    final port = int.parse(relay.url.split(':').last);
+    await relay.stopServer();
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+    expect((await settled(handle)).phase, SyncRequestPhase.failed);
+
+    relay = MockRelay(name: 'engine', explicitPort: port);
+    await relay.startServer();
+    await publish(relay, 'published while it was down');
+
+    expect(
+      (await engine
+              .watchStatus(handle)
+              .firstWhere((s) => s.phase == SyncRequestPhase.synced))
+          .phase,
+      SyncRequestPhase.synced,
+      reason: 'nobody called ensure again, the backoff timer did',
+    );
+    expect(await cache.loadEvents(kinds: [1]), hasLength(1));
   });
 
   test('a slow relay does not hold back a fast one', () async {

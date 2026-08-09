@@ -106,6 +106,12 @@ still sees a single query at a time rather than one per request.
 Coverage is tracked per relay, which is what lets the engine ask a lagging relay
 for exactly what it missed rather than replaying everything everywhere.
 
+A relay that leaves something unanswered is retried on its own, after a backoff
+that doubles from `initialBackoff` up to `maxBackoff` and resets the moment that
+relay answers. Your app has nothing to call back: a request that failed while
+the train was in a tunnel recovers by itself. The backoff lives in memory, so
+restarting tries again straight away.
+
 ## What it does not do yet
 
 - **No live subscription.** New events show up on a later `ensure`, once the
