@@ -1,13 +1,15 @@
 name: sync_engine_shim_for_ndk
-description: A starting point for Dart libraries or applications.
-version: 1.0.0
+description: Downward sync engine for the ndk package. Declare what you need, the engine keeps the NDK cache in sync with the relays.
+version: 0.1.0
 # repository: https://github.com/my_org/my_repo
 
 environment:
   sdk: ^3.12.2
 
-# Add regular dependencies here.
 dependencies:
+  ndk: ^0.8.4-dev.10
+  rxdart: ^0.28.0
+  sembast: ^3.8.9+1
   # path: ^1.9.0
 
 dev_dependencies:

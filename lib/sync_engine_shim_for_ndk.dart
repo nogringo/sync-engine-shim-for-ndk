@@ -1,8 +1,10 @@
-/// Support for doing something awesome.
-///
-/// More dartdocs go here.
+/// Downward sync engine for the ndk package.
 library;
 
-export 'src/sync_engine_shim_for_ndk_base.dart';
-
-// TODO: Export any libraries intended for clients of this package.
+export 'src/entities/relay_filter_sync_state.dart';
+export 'src/entities/relay_knowledge.dart';
+export 'src/entities/sync_engine_status.dart';
+export 'src/entities/sync_handle.dart';
+export 'src/entities/sync_request.dart';
+export 'src/entities/sync_request_status.dart';
+export 'src/sync_engine.dart';
