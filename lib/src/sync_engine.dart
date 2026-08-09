@@ -72,8 +72,8 @@ class SyncEngine {
     _publishEngineStatus();
   }
 
-  /// Stops taking on new work and waits for what is in flight. Handles and
-  /// persisted state survive.
+  /// Stops the work, at the next page of whatever is walking. Handles and
+  /// persisted state survive, and [start] picks up where this left off.
   Future<void> stop() async {
     _started = false;
 
@@ -132,8 +132,9 @@ class SyncEngine {
     await _sync(handle.id, staleness: Duration.zero);
   }
 
-  /// Drops the caller's interest in [handle]. Sync state stays persisted, and
-  /// the work already in flight is left to finish.
+  /// Drops the caller's interest in [handle]. What was synced stays
+  /// persisted, and a walk still running stops at its next page rather than
+  /// spending network on a request nobody wants any more.
   void release(SyncHandle handle) {
     final registration = _registrations[handle.id];
     if (registration == null) return;
@@ -141,6 +142,7 @@ class SyncEngine {
     registration.holders--;
     if (registration.holders > 0) return;
 
+    registration.cancelled = true;
     _registrations.remove(handle.id);
     unawaited(registration.subject.close());
     _publishEngineStatus();
@@ -187,7 +189,7 @@ class SyncEngine {
 
     // Waiting on every relay of the request only gates this status update.
     // Each relay keeps draining its own queue meanwhile.
-    final answers = await Future.wait([
+    final outcomes = await Future.wait([
       for (final relayUrl in registration.request.relays)
         _enqueue(
           relayUrl,
@@ -195,10 +197,17 @@ class SyncEngine {
         ),
     ]);
 
+    if (outcomes.contains(TaskOutcome.cancelled)) {
+      // Back to where the request was before this pass: nothing running, and
+      // whatever it managed to cover is already persisted.
+      _emit(registration, SyncRequestPhase.idle);
+      return;
+    }
+
     _emit(
       registration,
       // One relay answering is enough: the silent ones are retried later.
-      answers.contains(true)
+      outcomes.contains(TaskOutcome.answered)
           ? SyncRequestPhase.synced
           : SyncRequestPhase.failed,
       states: await _statesOf(registration.request),
@@ -206,17 +215,20 @@ class SyncEngine {
   }
 
   /// Every filter of [registration] on this one relay, one after the other.
-  /// Returns false when the relay left something unanswered.
-  Future<bool> _syncRelay(
+  Future<TaskOutcome> _syncRelay(
     _Registration registration,
     String relayUrl,
     Duration? staleness,
     DateTime startedAt,
   ) async {
     final request = registration.request;
-    var answered = true;
+    var outcome = TaskOutcome.answered;
+
+    bool cancelled() => registration.cancelled || !_started;
 
     for (final filter in request.filters) {
+      if (cancelled()) return TaskOutcome.cancelled;
+
       final tasks = planFilterOnRelay(
         relayUrl: relayUrl,
         filter: filter,
@@ -231,22 +243,28 @@ class SyncEngine {
       );
 
       for (final task in tasks) {
-        final done = await _runner.run(
+        final result = await _runner.run(
           task,
           authPubkey: request.authPubkey,
           startedAt: startedAt,
+          isCancelled: cancelled,
         );
-        if (!done) answered = false;
+
+        if (result == TaskOutcome.cancelled) return TaskOutcome.cancelled;
+        if (result == TaskOutcome.unreachable) outcome = result;
       }
     }
 
-    return answered;
+    return outcome;
   }
 
   /// Queues [work] behind whatever this relay is already doing. Relays are
   /// keyed by normalised url, otherwise two spellings would mean two queues,
   /// and two queries at once on a single relay.
-  Future<bool> _enqueue(String relayUrl, Future<bool> Function() work) {
+  Future<TaskOutcome> _enqueue(
+    String relayUrl,
+    Future<TaskOutcome> Function() work,
+  ) {
     final key = cleanRelayUrl(relayUrl) ?? relayUrl;
     final queue = _queues.putIfAbsent(key, () => _RelayQueue(key));
     final job = _Job(work);
@@ -264,11 +282,11 @@ class SyncEngine {
     while (queue.jobs.isNotEmpty) {
       final job = queue.jobs.removeFirst();
       try {
-        final answered = await job.work();
-        _noteAttempt(queue, answered: answered);
-        job.done.complete(answered);
+        final outcome = await job.work();
+        _noteAttempt(queue, outcome);
+        job.done.complete(outcome);
       } catch (error, stackTrace) {
-        _noteAttempt(queue, answered: false);
+        _noteAttempt(queue, TaskOutcome.unreachable);
         job.done.completeError(error, stackTrace);
       }
     }
@@ -277,9 +295,12 @@ class SyncEngine {
   }
 
   /// A relay that answers clears its own backoff. One that does not gets a
-  /// wake up call, which re-runs every request wanting it.
-  void _noteAttempt(_RelayQueue queue, {required bool answered}) {
-    if (answered) {
+  /// wake up call, which re-runs every request wanting it. Giving up on
+  /// purpose leaves the relay's standing untouched.
+  void _noteAttempt(_RelayQueue queue, TaskOutcome outcome) {
+    if (outcome == TaskOutcome.cancelled) return;
+
+    if (outcome == TaskOutcome.answered) {
       queue.failures = 0;
       queue.retry?.cancel();
       queue.retry = null;
@@ -405,6 +426,10 @@ class _Registration {
   /// Callers holding this handle. The registration goes away at zero.
   int holders = 1;
 
+  /// Set when the last holder let go, read between pages so a long backfill
+  /// does not outlive the interest in it.
+  var cancelled = false;
+
   Future<void>? running;
 }
 
@@ -428,6 +453,6 @@ class _RelayQueue {
 class _Job {
   _Job(this.work);
 
-  final Future<bool> Function() work;
-  final done = Completer<bool>();
+  final Future<TaskOutcome> Function() work;
+  final done = Completer<TaskOutcome>();
 }

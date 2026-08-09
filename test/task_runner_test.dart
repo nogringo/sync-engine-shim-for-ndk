@@ -96,7 +96,7 @@ void main() {
   test('covers the whole window when the relay has nothing', () async {
     final task = taskFor(relay.url, since: at(3600), until: at(0));
 
-    expect(await runner.run(task, startedAt: startedAt), isTrue);
+    expect(await runner.run(task, startedAt: startedAt), TaskOutcome.answered);
     expect(await coverageOf(task.filter), [(from: at(3600), to: at(0))]);
   });
 
@@ -104,7 +104,7 @@ void main() {
     await publish([at(50), at(40), at(30), at(20), at(10)]);
     final task = taskFor(relay.url, since: at(3600), until: at(0));
 
-    expect(await runner.run(task, startedAt: startedAt), isTrue);
+    expect(await runner.run(task, startedAt: startedAt), TaskOutcome.answered);
     expect(await coverageOf(task.filter), [(from: at(3600), to: at(0))]);
   });
 
@@ -143,7 +143,7 @@ void main() {
 
     expect(
       await runner.run(task, startedAt: startedAt),
-      isFalse,
+      TaskOutcome.unreachable,
       reason: 'an unreachable relay must not look like an exhausted one',
     );
     expect(await coverageOf(task.filter), isEmpty);
@@ -163,7 +163,7 @@ void main() {
 
     expect(
       await impatient.run(task, startedAt: startedAt),
-      isFalse,
+      TaskOutcome.unreachable,
       reason: 'the relay is connected, only the answer never came',
     );
     expect(await coverageOf(task.filter, relayUrl: silent.url), isEmpty);
@@ -180,6 +180,26 @@ void main() {
     );
 
     expect(state!.lastAttemptAt, startedAt);
+  });
+
+  test('stops walking when cancelled, keeping what it covered', () async {
+    await publish([at(50), at(40), at(30), at(20), at(10)]);
+    final task = taskFor(relay.url, since: at(3600), until: at(0));
+    var pages = 0;
+
+    final outcome = await runner.run(
+      task,
+      startedAt: startedAt,
+      isCancelled: () => pages++ > 0,
+    );
+
+    expect(outcome, TaskOutcome.cancelled);
+    expect(
+      await coverageOf(task.filter),
+      isNotEmpty,
+      reason: 'the page it did walk before giving up still counts',
+    );
+    expect(await coverageOf(task.filter), isNot([(from: at(3600), to: at(0))]));
   });
 
   test('merges a second run into the coverage of the first', () async {

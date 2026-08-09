@@ -6,6 +6,10 @@ import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
 import 'package:sync_engine_shim_for_ndk/src/planner.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
 
+/// How a task ended. Giving up on purpose is not a failure: it must not count
+/// against the relay, which never did anything wrong.
+enum TaskOutcome { answered, unreachable, cancelled }
+
 /// Runs planned tasks against the relays and records the ground covered.
 /// Events land in the NDK cache, this only keeps track of what was walked.
 class TaskRunner {
@@ -35,18 +39,24 @@ class TaskRunner {
   /// Every page shares [startedAt] as its completedAt, which is what lets the
   /// pages merge back into a single range.
   ///
-  /// Returns false when the relay could not be reached, in which case nothing
-  /// is marked as covered.
-  Future<bool> run(
+  /// [isCancelled] is read between pages, which is the only place a walk can
+  /// be dropped without losing the page in flight. A long backfill therefore
+  /// stops within one page rather than running on after the caller left.
+  ///
+  /// Nothing is marked as covered when the relay could not be reached.
+  Future<TaskOutcome> run(
     SyncTask task, {
     String? authPubkey,
     required DateTime startedAt,
+    bool Function()? isCancelled,
   }) async {
     final fingerprint = filterFingerprint(task.filter);
     final since = task.filter.since!;
     var until = task.filter.until!;
 
     while (true) {
+      if (isCancelled?.call() ?? false) return TaskOutcome.cancelled;
+
       var timedOut = false;
       final events = await ndk.requests
           .query(
@@ -68,7 +78,7 @@ class TaskRunner {
           authPubkey: authPubkey,
           startedAt: startedAt,
         );
-        return false;
+        return TaskOutcome.unreachable;
       }
 
       if (events.isEmpty) {
@@ -79,7 +89,7 @@ class TaskRunner {
           startedAt: startedAt,
           covered: (from: since, to: until),
         );
-        return true;
+        return TaskOutcome.answered;
       }
 
       final oldest = events.map((event) => event.createdAt).reduce(_min);
@@ -103,7 +113,7 @@ class TaskRunner {
         covered: (from: walkedFrom, to: until),
       );
 
-      if (walkedFrom <= since) return true;
+      if (walkedFrom <= since) return TaskOutcome.answered;
       until = walkedFrom - 1;
     }
   }

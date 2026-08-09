@@ -222,6 +222,26 @@ void main() {
     expect(await cache.loadEvents(kinds: [1]), hasLength(1));
   });
 
+  test('stop gives up on the work in flight', () async {
+    final slow = MockRelay(name: 'slow');
+    await slow.startServer(delayResponse: const Duration(milliseconds: 300));
+    addTearDown(slow.stopServer);
+
+    engine.start();
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [slow.url]),
+    );
+
+    await engine.stop();
+
+    expect(engine.engineStatus.phase, SyncEnginePhase.stopped);
+    expect(
+      engine.status(handle).phase,
+      SyncRequestPhase.idle,
+      reason: 'the pass was dropped, not finished',
+    );
+  });
+
   test('a slow relay does not hold back a fast one', () async {
     final slow = MockRelay(name: 'slow');
     await slow.startServer(delayResponse: const Duration(seconds: 1));

@@ -64,7 +64,9 @@ of the lists.
 coverage is.
 
 `release` drops your interest in a handle. A handle survives until its last
-holder releases it, and what was synced stays in the database either way.
+holder releases it, and what was synced stays in the database either way. A walk
+still running stops at its next page, so leaving a screen stops spending network
+on it. Same for `stop`, which drops what is in flight instead of waiting it out.
 
 ## How far back, and how often
 
