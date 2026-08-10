@@ -48,10 +48,20 @@ void main() {
     expect(tasks.single.filter.until, seconds(now));
   });
 
-  test('reaches back to the epoch when the filter has no since', () {
+  test('leaves the since out when it would reach under the epoch', () {
     final tasks = plan(Filter(kinds: [1]));
 
-    expect(tasks.single.filter.since, lessThan(0));
+    expect(
+      tasks.single.filter.since,
+      isNull,
+      reason: 'a relay must never be sent a negative timestamp',
+    );
+  });
+
+  test('leaves the since out when the overlap digs under the epoch', () {
+    final tasks = plan(Filter(kinds: [1], since: 30));
+
+    expect(tasks.single.filter.since, isNull);
   });
 
   test('stops at the filter until when it is in the past', () {

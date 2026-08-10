@@ -80,18 +80,19 @@ List<SyncTask> planFilterOnRelay({
   return tasks;
 }
 
-SyncTask _task(
-  String relayUrl,
-  Filter filter,
-  DateTime since,
-  DateTime until,
-) => SyncTask(
-  relayUrl: relayUrl,
-  filter: filter.clone()
-    ..since = _secondsFromDate(since)
-    ..until = _secondsFromDate(until)
-    ..limit = null,
-);
+SyncTask _task(String relayUrl, Filter filter, DateTime since, DateTime until) {
+  // Reaching under the epoch means asking for everything, which a filter says
+  // by leaving `since` out rather than by carrying a negative timestamp.
+  final seconds = _secondsFromDate(since);
+
+  return SyncTask(
+    relayUrl: relayUrl,
+    filter: filter.clone()
+      ..since = seconds > 0 ? seconds : null
+      ..until = _secondsFromDate(until)
+      ..limit = null,
+  );
+}
 
 /// How long ago the most recent coverage was validated, as opposed to how far
 /// it reaches: a window fetched an hour ago is stale even if it was fetched up

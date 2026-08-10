@@ -51,7 +51,8 @@ class TaskRunner {
     bool Function()? isCancelled,
   }) async {
     final fingerprint = filterFingerprint(task.filter);
-    final since = task.filter.since!;
+    // No `since` on the task means the window opens at the epoch.
+    final since = task.filter.since ?? 0;
     var until = task.filter.until!;
 
     while (true) {
