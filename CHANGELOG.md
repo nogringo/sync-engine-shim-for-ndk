@@ -1,3 +1,9 @@
+## 0.2.0
+
+- `SyncRequestStatus` carries a `progress`, the last page that landed: relay,
+  filter fingerprint, the period it closed and how many events it returned. The
+  status is now emitted on every page rather than twice per pass.
+
 ## 0.1.1
 
 - Never send a negative `since` to a relay. A window opening at the epoch, or a

@@ -1,5 +1,6 @@
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_handle.dart';
+import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
 
 enum SyncRequestPhase {
   /// Registered, no work started yet.
@@ -21,6 +22,7 @@ class SyncRequestStatus {
     required this.phase,
     this.relayStates = const [],
     this.lastError,
+    this.progress,
   });
 
   final SyncHandle handle;
@@ -30,4 +32,7 @@ class SyncRequestStatus {
   final List<RelayFilterSyncState> relayStates;
 
   final Object? lastError;
+
+  /// The last page that landed. Null until one has.
+  final SyncProgress? progress;
 }

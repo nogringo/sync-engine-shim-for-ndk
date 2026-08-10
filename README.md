@@ -63,6 +63,12 @@ of the lists.
 `refresh` is the pull to refresh gesture: go and look now, however fresh the
 coverage is.
 
+`watchStatus` carries the phase, and `progress` holds the last page that landed:
+which relay, which filter, the period it closed and how many events it returned.
+It is a sign of life during a long walk, not a percentage, and its count is a
+rate rather than an inventory since the second at the boundary of two pages is
+asked twice.
+
 `release` drops your interest in a handle. A handle survives until its last
 holder releases it, and what was synced stays in the database either way. A walk
 still running stops at its next page, so leaving a screen stops spending network

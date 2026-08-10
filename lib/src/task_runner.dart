@@ -2,6 +2,7 @@ import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/helpers/relay_helper.dart';
 import 'package:sync_engine_shim_for_ndk/src/coverage.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
+import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
 import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
 import 'package:sync_engine_shim_for_ndk/src/planner.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
@@ -49,6 +50,7 @@ class TaskRunner {
     String? authPubkey,
     required DateTime startedAt,
     bool Function()? isCancelled,
+    void Function(SyncProgress)? onProgress,
   }) async {
     final fingerprint = filterFingerprint(task.filter);
     // No `since` on the task means the window opens at the epoch.
@@ -90,6 +92,7 @@ class TaskRunner {
           startedAt: startedAt,
           covered: (from: since, to: until),
         );
+        _report(onProgress, task, fingerprint, (from: since, to: until), 0);
         return TaskOutcome.answered;
       }
 
@@ -113,6 +116,10 @@ class TaskRunner {
         startedAt: startedAt,
         covered: (from: walkedFrom, to: until),
       );
+      _report(onProgress, task, fingerprint, (
+        from: walkedFrom,
+        to: until,
+      ), events.length);
 
       if (walkedFrom <= since) return TaskOutcome.answered;
       until = walkedFrom - 1;
@@ -125,6 +132,22 @@ class TaskRunner {
   /// that was dropped before reaching a socket, which ends without a timeout.
   bool _isReachable(String relayUrl) =>
       ndk.relays.isRelayConnected(cleanRelayUrl(relayUrl) ?? relayUrl);
+
+  void _report(
+    void Function(SyncProgress)? onProgress,
+    SyncTask task,
+    String fingerprint,
+    ({int from, int to}) closed,
+    int eventCount,
+  ) => onProgress?.call(
+    SyncProgress(
+      relayUrl: task.relayUrl,
+      filterFingerprint: fingerprint,
+      from: _dateFromSeconds(closed.from),
+      to: _dateFromSeconds(closed.to),
+      eventCount: eventCount,
+    ),
+  );
 
   Future<void> _record({
     required String relayUrl,

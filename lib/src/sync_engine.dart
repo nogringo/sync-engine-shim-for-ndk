@@ -8,6 +8,7 @@ import 'package:sembast/sembast.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_engine_status.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_handle.dart';
+import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_request.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_request_status.dart';
 import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
@@ -185,7 +186,7 @@ class SyncEngine {
 
   Future<void> _pass(_Registration registration, Duration? staleness) async {
     final startedAt = DateTime.now().toUtc();
-    _emit(registration, SyncRequestPhase.syncing);
+    _emit(registration, phase: SyncRequestPhase.syncing);
 
     // Waiting on every relay of the request only gates this status update.
     // Each relay keeps draining its own queue meanwhile.
@@ -200,14 +201,14 @@ class SyncEngine {
     if (outcomes.contains(TaskOutcome.cancelled)) {
       // Back to where the request was before this pass: nothing running, and
       // whatever it managed to cover is already persisted.
-      _emit(registration, SyncRequestPhase.idle);
+      _emit(registration, phase: SyncRequestPhase.idle);
       return;
     }
 
     _emit(
       registration,
       // One relay answering is enough: the silent ones are retried later.
-      outcomes.contains(TaskOutcome.answered)
+      phase: outcomes.contains(TaskOutcome.answered)
           ? SyncRequestPhase.synced
           : SyncRequestPhase.failed,
       states: await _statesOf(registration.request),
@@ -248,6 +249,7 @@ class SyncEngine {
           authPubkey: request.authPubkey,
           startedAt: startedAt,
           isCancelled: cancelled,
+          onProgress: (progress) => _emit(registration, progress: progress),
         );
 
         if (result == TaskOutcome.cancelled) return TaskOutcome.cancelled;
@@ -347,17 +349,23 @@ class SyncEngine {
   }
 
   void _emit(
-    _Registration registration,
-    SyncRequestPhase phase, {
-    List<RelayFilterSyncState> states = const [],
+    _Registration registration, {
+    SyncRequestPhase? phase,
+    List<RelayFilterSyncState>? states,
+    SyncProgress? progress,
   }) {
     if (registration.subject.isClosed) return;
+
+    registration.phase = phase ?? registration.phase;
+    registration.states = states ?? registration.states;
+    registration.progress = progress ?? registration.progress;
 
     registration.subject.add(
       SyncRequestStatus(
         handle: registration.handle,
-        phase: phase,
-        relayStates: states,
+        phase: registration.phase,
+        relayStates: registration.states,
+        progress: registration.progress,
       ),
     );
   }
@@ -431,6 +439,12 @@ class _Registration {
   var cancelled = false;
 
   Future<void>? running;
+
+  /// What the next status will be built from, so that reporting a page does
+  /// not have to restate the phase, nor the other way round.
+  var phase = SyncRequestPhase.idle;
+  List<RelayFilterSyncState> states = const [];
+  SyncProgress? progress;
 }
 
 /// Serialises the work aimed at one relay, and carries that relay's backoff.

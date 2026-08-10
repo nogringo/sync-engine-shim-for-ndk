@@ -173,6 +173,27 @@ void main() {
     expect(await cache.loadEvents(kinds: [1]), hasLength(2));
   });
 
+  test('exposes the last page that landed', () async {
+    await publish(relay, 'hello');
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+
+    final seen = <SyncProgress>[];
+    final subscription = engine.watchStatus(handle).listen((status) {
+      if (status.progress != null) seen.add(status.progress!);
+    });
+
+    await settled(handle);
+    await subscription.cancel();
+
+    expect(seen, isNotEmpty);
+    expect(seen.last.relayUrl, relay.url);
+    expect(engine.status(handle).progress, isNotNull);
+  });
+
   test('queries each relay of a request on its own', () async {
     final other = MockRelay(name: 'other');
     await other.startServer();

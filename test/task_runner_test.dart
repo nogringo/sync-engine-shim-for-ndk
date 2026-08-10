@@ -1,6 +1,7 @@
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
 import 'package:sembast/sembast_memory.dart' hide Filter;
+import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
 import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
 import 'package:sync_engine_shim_for_ndk/src/planner.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
@@ -180,6 +181,42 @@ void main() {
     );
 
     expect(state!.lastAttemptAt, startedAt);
+  });
+
+  test('reports every page it closes', () async {
+    await publish([at(50), at(40), at(30)]);
+    final task = taskFor(relay.url, since: at(3600), until: at(0));
+    final pages = <SyncProgress>[];
+
+    await runner.run(task, startedAt: startedAt, onProgress: pages.add);
+
+    expect(pages.length, greaterThan(1), reason: 'pageLimit is 2 here');
+    expect(pages.first.relayUrl, relay.url);
+    expect(pages.first.filterFingerprint, filterFingerprint(task.filter));
+    expect(
+      pages.first.to,
+      DateTime.fromMillisecondsSinceEpoch(at(0) * 1000, isUtc: true),
+    );
+    expect(
+      pages.map((page) => page.eventCount).reduce((a, b) => a + b),
+      greaterThan(3),
+      reason:
+          'a rate, not an inventory: the boundary second is asked twice, '
+          'so three events are reported more than three times',
+    );
+    expect(
+      pages.last.eventCount,
+      0,
+      reason: 'the walk ends on the empty page that proves there is no more',
+    );
+    expect(
+      pages.map((page) => page.to.millisecondsSinceEpoch).toList(),
+      orderedEquals(
+        pages.map((page) => page.to.millisecondsSinceEpoch).toList()
+          ..sort((a, b) => b.compareTo(a)),
+      ),
+      reason: 'pages report older and older periods',
+    );
   });
 
   test('stops walking when cancelled, keeping what it covered', () async {
