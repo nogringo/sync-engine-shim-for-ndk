@@ -1,3 +1,7 @@
+## 0.3.0
+
+- Depend on `ndk` 0.9.0.
+
 ## 0.2.0
 
 - `SyncRequestStatus` carries a `progress`, the last page that landed: relay,
