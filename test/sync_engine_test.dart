@@ -18,6 +18,7 @@ void main() {
   late MockRelay relay;
   late MemCacheManager cache;
   late Ndk ndk;
+  late Database db;
   late SyncEngine engine;
 
   setUp(() async {
@@ -33,7 +34,7 @@ void main() {
       ),
     );
 
-    final db = await newDatabaseFactoryMemory().openDatabase('sync_engine.db');
+    db = await newDatabaseFactoryMemory().openDatabase('sync_engine.db');
     engine = SyncEngine(
       ndk,
       db: db,
@@ -261,6 +262,57 @@ void main() {
       SyncRequestPhase.idle,
       reason: 'the pass was dropped, not finished',
     );
+  });
+
+  test('a failing pass is reported once, to whoever awaits it', () async {
+    final ownDb = await newDatabaseFactoryMemory().openDatabase('own.db');
+    // Long enough that the retry armed by the failure stays asleep: it would
+    // start a pass of its own, and nobody would be there to await that one.
+    final own = SyncEngine(
+      ndk,
+      db: ownDb,
+      initialBackoff: const Duration(minutes: 5),
+    );
+    addTearDown(own.dispose);
+
+    own.start();
+    final handle = own.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+    await own
+        .watchStatus(handle)
+        .firstWhere((status) => status.phase == SyncRequestPhase.synced);
+
+    await ownDb.close();
+
+    await expectLater(own.refresh(handle), throwsA(isA<DatabaseException>()));
+
+    // The caller took the error. A second report would land here, uncaught.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  });
+
+  test('dispose waits for a walk whose handle was released', () async {
+    final slow = MockRelay(name: 'slow');
+    await slow.startServer(delayResponse: const Duration(seconds: 2));
+    addTearDown(slow.stopServer);
+
+    engine.start();
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [slow.url]),
+    );
+
+    while (slow.connectedClientCount == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+
+    engine.release(handle);
+    await engine.dispose();
+    await db.close();
+
+    // A walk nobody can wait for would land here, writing coverage on a store
+    // the caller already closed, and the test would fail on that error.
+    await Future<void>.delayed(const Duration(seconds: 3));
   });
 
   test('a slow relay does not hold back a fast one', () async {

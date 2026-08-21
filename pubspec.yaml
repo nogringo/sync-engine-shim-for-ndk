@@ -1,6 +1,6 @@
 name: sync_engine_shim_for_ndk
 description: Downward sync engine for the ndk package. Declare what you need, the engine keeps the NDK cache in sync with the relays.
-version: 0.3.0
+version: 0.3.1
 repository: https://github.com/nogringo/sync-engine-shim-for-ndk
 
 topics:

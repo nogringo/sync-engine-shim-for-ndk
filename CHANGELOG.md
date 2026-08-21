@@ -1,3 +1,12 @@
+## 0.3.1
+
+- `stop` and `dispose` wait for a walk whose handle was released mid pass.
+  Releasing dropped the registration, and with it the only way to reach the
+  pass still running: it kept reading and writing the store after the caller
+  closed the database.
+- A relay retry armed while `stop` was waiting is now cancelled too, instead of
+  outliving the call.
+
 ## 0.3.0
 
 - Depend on `ndk` 0.9.0.

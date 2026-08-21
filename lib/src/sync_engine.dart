@@ -60,6 +60,12 @@ class SyncEngine {
   final _registrations = <String, _Registration>{};
   final _queues = <String, _RelayQueue>{};
 
+  /// Every pass still walking, released ones included. A registration leaves
+  /// [_registrations] as soon as its last holder does, while its pass still
+  /// owns a relay query and a store write, so tracking them here is what lets
+  /// [stop] wait for work nobody is registered for any more.
+  final _passes = <Future<void>>{};
+
   var _started = false;
 
   /// Starts processing registered requests.
@@ -78,12 +84,15 @@ class SyncEngine {
   Future<void> stop() async {
     _started = false;
 
+    await _inFlight();
+
+    // After the walks, not before: a job landing on an unreachable relay arms
+    // its own retry, and one armed mid-stop would outlive this call.
     for (final queue in _queues.values) {
       queue.retry?.cancel();
       queue.retry = null;
     }
 
-    await _inFlight();
     _publishEngineStatus();
   }
 
@@ -173,8 +182,17 @@ class SyncEngine {
     final running = registration.running;
     if (running != null) return running;
 
+    // Signalled from the callback the pass already had, rather than from a
+    // listener of its own: a second listener would carry the error into a
+    // future nobody reads, and report it a second time behind the back of the
+    // caller who handled it.
+    final landed = Completer<void>();
+    _passes.add(landed.future);
+
     final pass = _pass(registration, staleness).whenComplete(() {
       registration.running = null;
+      _passes.remove(landed.future);
+      landed.complete();
       _publishEngineStatus();
     });
 
@@ -391,10 +409,7 @@ class SyncEngine {
     );
   }
 
-  Future<void> _inFlight() => Future.wait([
-    for (final registration in _registrations.values)
-      if (registration.running != null) registration.running!,
-  ]);
+  Future<void> _inFlight() => Future.wait(_passes.toList());
 
   /// Two requests asking the same thing share a handle, whatever the order of
   /// their filters and relays.
