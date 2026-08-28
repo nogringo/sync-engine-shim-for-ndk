@@ -80,6 +80,25 @@ How far back a request reaches is bounded by each filter's own `since`. Without
 one, the engine walks back until a relay says it has nothing older, which for a
 broad filter is a lot of events.
 
+A filter's `until` closes the other end, which is how a request asks for a past
+period rather than for everything up to now. Two periods are two filters, or two
+requests: the window is part of what identifies a request, so different windows
+never collapse onto the same handle.
+
+```dart
+int at(DateTime date) => date.millisecondsSinceEpoch ~/ 1000;
+
+engine.ensure(
+  SyncRequest(
+    filters: [
+      Filter(kinds: [1], since: at(DateTime.utc(2023)), until: at(DateTime.utc(2024))),
+      Filter(kinds: [1], since: at(DateTime.utc(2025)), until: at(DateTime.utc(2026))),
+    ],
+    relays: const ['wss://relay.damus.io'],
+  ),
+);
+```
+
 Two durations drive the rest, given to the engine and overridable per request:
 
 ```dart

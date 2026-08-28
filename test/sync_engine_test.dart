@@ -114,6 +114,23 @@ void main() {
     expect(engine.engineStatus.activeRequests, 1);
   });
 
+  test('gives a handle of its own to each window', () {
+    SyncRequest window(int since, int until) => SyncRequest(
+      filters: [
+        notes()
+          ..since = since
+          ..until = until,
+      ],
+      relays: [relay.url],
+    );
+
+    expect(
+      engine.ensure(window(1672531200, 1704067200)),
+      isNot(engine.ensure(window(1735689600, 1767225600))),
+    );
+    expect(engine.engineStatus.activeRequests, 2);
+  });
+
   test('keeps the handle alive until every holder released it', () async {
     final request = SyncRequest(filters: [notes()], relays: [relay.url]);
     final handle = engine.ensure(request);

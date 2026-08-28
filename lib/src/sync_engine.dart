@@ -4,7 +4,7 @@ import 'dart:collection';
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/helpers/relay_helper.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:sembast/sembast.dart';
+import 'package:sembast/sembast.dart' hide Filter;
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_engine_status.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_handle.dart';
@@ -412,16 +412,22 @@ class SyncEngine {
   Future<void> _inFlight() => Future.wait(_passes.toList());
 
   /// Two requests asking the same thing share a handle, whatever the order of
-  /// their filters and relays.
+  /// their filters and relays. The window is part of that: a fingerprint leaves
+  /// `since` and `until` out so that pagination does not change what a filter
+  /// is, but two periods are two different things to ask for.
   String _identityOf(SyncRequest request) {
     final filters = [
-      for (final filter in request.filters) filterFingerprint(filter),
+      for (final filter in request.filters) _filterIdentity(filter),
     ]..sort();
     final relays = _relayKeysOf(request).toList()..sort();
 
     return '${filters.join(',')}|${request.authPubkey ?? ''}|'
         '${relays.join(',')}';
   }
+
+  String _filterIdentity(Filter filter) =>
+      '${filterFingerprint(filter)}:${filter.since ?? ''}:'
+      '${filter.until ?? ''}';
 
   Set<String> _relayKeysOf(SyncRequest request) => {
     for (final relay in request.relays) cleanRelayUrl(relay) ?? relay,

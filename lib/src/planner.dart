@@ -58,7 +58,13 @@ List<SyncTask> planFilterOnRelay({
 
   final overlap = overlapMargin + _giftWrapMargin(filter);
   final coverage = state?.coverage ?? const <CoverageRange>[];
-  final fresh = _isFresh(coverage, now: now, maxStaleness: maxStaleness);
+  final fresh = _isFresh(
+    coverage,
+    from: from,
+    to: to,
+    now: now,
+    maxStaleness: maxStaleness,
+  );
 
   final tasks = <SyncTask>[];
   var reachesTheEnd = false;
@@ -94,22 +100,32 @@ SyncTask _task(String relayUrl, Filter filter, DateTime since, DateTime until) {
   );
 }
 
-/// How long ago the most recent coverage was validated, as opposed to how far
-/// it reaches: a window fetched an hour ago is stale even if it was fetched up
-/// to the second.
+/// How long ago the coverage nearest the recent end of `[from, to]` was
+/// validated, as opposed to how far it reaches: a window fetched an hour ago is
+/// stale even if it was fetched up to the second.
+///
+/// Only what overlaps the window counts. Windows sharing a fingerprint share a
+/// coverage list, so a backfill landing far in the past must not pass for a
+/// freshly validated present, nor a live tail for a period nobody ever walked.
 bool _isFresh(
   List<CoverageRange> coverage, {
+  required DateTime from,
+  required DateTime to,
   required DateTime now,
   required Duration maxStaleness,
 }) {
-  if (maxStaleness == Duration.zero || coverage.isEmpty) return false;
+  if (maxStaleness == Duration.zero) return false;
 
-  var validatedAt = coverage.first.completedAt;
+  CoverageRange? nearestTheEnd;
   for (final range in coverage) {
-    if (range.completedAt.isAfter(validatedAt)) validatedAt = range.completedAt;
+    if (range.to.isBefore(from) || range.from.isAfter(to)) continue;
+    if (nearestTheEnd == null || range.to.isAfter(nearestTheEnd.to)) {
+      nearestTheEnd = range;
+    }
   }
 
-  return now.difference(validatedAt) < maxStaleness;
+  return nearestTheEnd != null &&
+      now.difference(nearestTheEnd.completedAt) < maxStaleness;
 }
 
 Duration _giftWrapMargin(Filter filter) =>

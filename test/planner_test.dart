@@ -188,6 +188,49 @@ void main() {
     expect(tasks.single.filter.until, seconds(hole));
   });
 
+  test('fetches a window no coverage of its own touches', () {
+    final since = ago(const Duration(days: 30));
+    final until = ago(const Duration(days: 20));
+    final state = stateWith([covered(ago(const Duration(days: 3)), now)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since), until: seconds(until)),
+      state: state,
+    );
+
+    expect(
+      tasks,
+      hasLength(1),
+      reason:
+          'a filter fingerprint ignores the window, so a fresh pass elsewhere '
+          'in the shared coverage must not pass for this period',
+    );
+    expect(tasks.single.filter.since, seconds(since.subtract(overlapMargin)));
+    expect(tasks.single.filter.until, seconds(until));
+  });
+
+  test('revisits the recent end when only an older period is fresh', () {
+    final since = ago(const Duration(days: 30));
+    final lastFetch = ago(const Duration(hours: 2));
+    final state = stateWith([
+      covered(since, ago(const Duration(days: 20))),
+      covered(ago(const Duration(days: 10)), lastFetch, completedAt: lastFetch),
+    ]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since)),
+      state: state,
+    );
+
+    expect(
+      tasks.map((task) => task.filter.until),
+      contains(seconds(now)),
+      reason:
+          'freshness is measured where the window ends, not where it '
+          'was most recently walked',
+    );
+  });
+
   test('reaches two extra days back for gift wraps', () {
     final since = ago(const Duration(days: 30));
 
