@@ -1,4 +1,5 @@
 import 'package:ndk/ndk.dart';
+import 'package:sync_engine_shim_for_ndk/src/coverage.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 import 'package:sync_engine_shim_for_ndk/src/planner.dart';
 import 'package:test/test.dart';
@@ -77,7 +78,10 @@ void main() {
 
   test('plans nothing when the window is already covered and fresh', () {
     final since = ago(const Duration(days: 30));
-    final state = stateWith([covered(since, ago(const Duration(seconds: 10)))]);
+    final lastFetch = ago(const Duration(seconds: 10));
+    final state = stateWith([
+      covered(since, lastFetch, completedAt: lastFetch),
+    ]);
 
     final tasks = plan(
       Filter(kinds: [1], since: seconds(since)),
@@ -158,7 +162,10 @@ void main() {
 
   test('plans a fresh trailing window when staleness is zero', () {
     final since = ago(const Duration(days: 30));
-    final state = stateWith([covered(since, ago(const Duration(seconds: 10)))]);
+    final lastFetch = ago(const Duration(seconds: 10));
+    final state = stateWith([
+      covered(since, lastFetch, completedAt: lastFetch),
+    ]);
 
     final tasks = plan(
       Filter(kinds: [1], since: seconds(since)),
@@ -207,6 +214,30 @@ void main() {
     );
     expect(tasks.single.filter.since, seconds(since.subtract(overlapMargin)));
     expect(tasks.single.filter.until, seconds(until));
+  });
+
+  test('fetches past a window that stopped short of the present', () {
+    final since = ago(const Duration(days: 30));
+    final bounded = ago(const Duration(days: 20));
+    final state = stateWith([covered(since, bounded)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since)),
+      state: state,
+    );
+
+    expect(
+      tasks,
+      hasLength(1),
+      reason:
+          'that coverage was bounded by a window of its own, not by the '
+          'present: it says nothing about the twenty days after it',
+    );
+    expect(
+      tasks.single.filter.since,
+      seconds(bounded.add(grain).subtract(overlapMargin)),
+    );
+    expect(tasks.single.filter.until, seconds(now));
   });
 
   test('revisits the recent end when only an older period is fresh', () {

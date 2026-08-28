@@ -48,7 +48,7 @@ void main() {
     await relay.stopServer();
   });
 
-  Future<void> publish(MockRelay target, String content) async {
+  Future<void> publish(MockRelay target, String content, {DateTime? at}) async {
     await ndk.broadcast
         .broadcast(
           nostrEvent: Nip01Event(
@@ -56,7 +56,7 @@ void main() {
             kind: 1,
             tags: const [],
             content: content,
-            createdAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            createdAt: (at ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000,
           ),
           specificRelays: [target.url],
           customSigner: signer,
@@ -85,6 +85,38 @@ void main() {
     expect(status.phase, SyncRequestPhase.synced);
     expect(await cache.loadEvents(kinds: [1]), hasLength(1));
   });
+
+  test(
+    'fills a window reaching now behind one that stops in the past',
+    () async {
+      final now = DateTime.now();
+      int seconds(DateTime date) => date.millisecondsSinceEpoch ~/ 1000;
+      await publish(relay, 'old', at: now.subtract(const Duration(days: 25)));
+      await publish(relay, 'new');
+      engine.start();
+
+      final handle = engine.ensure(
+        SyncRequest(
+          filters: [
+            notes()
+              ..since = seconds(now.subtract(const Duration(days: 30)))
+              ..until = seconds(now.subtract(const Duration(days: 20))),
+            notes()..since = seconds(now.subtract(const Duration(days: 30))),
+          ],
+          relays: [relay.url],
+        ),
+      );
+      await settled(handle);
+
+      expect(
+        await cache.loadEvents(kinds: [1]),
+        hasLength(2),
+        reason:
+            'the first filter covers up to twenty days ago and no further, so '
+            'the second must still walk from there to now',
+      );
+    },
+  );
 
   test('stays idle until started', () async {
     await publish(relay, 'hello');

@@ -1,3 +1,16 @@
+## 0.3.2
+
+- Staleness is measured on the coverage nearest the end of the window being
+  planned, rather than on the whole coverage of the filter, and only coverage
+  that reached the end of the window it ran in has a say. Windows sharing a
+  fingerprint share a coverage list, so a backfill bounded in 2024 marked
+  everything after it as freshly validated and it was never fetched.
+- A request is identified by its windows too, not only by its filters and
+  relays. Asking for the same filter over two periods gave the same handle
+  back, and the second set of filters was silently dropped. A filter whose
+  `since` moves between two calls now yields a handle of its own, where it used
+  to join the previous one.
+
 ## 0.3.1
 
 - `stop` and `dispose` wait for a walk whose handle was released mid pass.

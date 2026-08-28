@@ -1,7 +1,7 @@
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 
 /// Nostr timestamps have a one second grain, so ranges one second apart touch.
-const _grain = Duration(seconds: 1);
+const grain = Duration(seconds: 1);
 
 /// Inserts [range] into [coverage] and returns a normalised list: sorted,
 /// disjoint, with [range] winning over whatever it overlaps.
@@ -25,7 +25,7 @@ List<CoverageRange> addRange(
       result.add(
         CoverageRange(
           from: existing.from,
-          to: range.from.subtract(_grain),
+          to: range.from.subtract(grain),
           completedAt: existing.completedAt,
         ),
       );
@@ -33,7 +33,7 @@ List<CoverageRange> addRange(
     if (existing.to.isAfter(range.to)) {
       result.add(
         CoverageRange(
-          from: range.to.add(_grain),
+          from: range.to.add(grain),
           to: existing.to,
           completedAt: existing.completedAt,
         ),
@@ -63,9 +63,9 @@ List<({DateTime from, DateTime to})> findGaps(
     if (range.from.isAfter(to)) break;
 
     if (range.from.isAfter(cursor)) {
-      gaps.add((from: cursor, to: _min(range.from.subtract(_grain), to)));
+      gaps.add((from: cursor, to: _min(range.from.subtract(grain), to)));
     }
-    cursor = range.to.add(_grain);
+    cursor = range.to.add(grain);
   }
 
   if (!cursor.isAfter(to)) {
@@ -81,7 +81,7 @@ List<CoverageRange> _merged(List<CoverageRange> sorted) {
   for (final range in sorted) {
     final previous = merged.isEmpty ? null : merged.last;
     final touches =
-        previous != null && !range.from.isAfter(previous.to.add(_grain));
+        previous != null && !range.from.isAfter(previous.to.add(grain));
 
     if (touches && previous.completedAt == range.completedAt) {
       merged[merged.length - 1] = CoverageRange(

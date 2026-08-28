@@ -100,13 +100,18 @@ SyncTask _task(String relayUrl, Filter filter, DateTime since, DateTime until) {
   );
 }
 
-/// How long ago the coverage nearest the recent end of `[from, to]` was
-/// validated, as opposed to how far it reaches: a window fetched an hour ago is
-/// stale even if it was fetched up to the second.
+/// How long ago the recent end of `[from, to]` was validated, as opposed to how
+/// far it reaches: a window fetched an hour ago is stale even if it was fetched
+/// up to the second.
 ///
-/// Only what overlaps the window counts. Windows sharing a fingerprint share a
-/// coverage list, so a backfill landing far in the past must not pass for a
-/// freshly validated present, nor a live tail for a period nobody ever walked.
+/// Only the coverage overlapping the window has a say, and of that only the
+/// range reaching furthest towards [to]. Windows sharing a fingerprint share a
+/// coverage list, so a backfill landing in an older period must not pass for a
+/// freshly validated present.
+///
+/// That range must also have gone as far as the window reached when it ran.
+/// One stopping in 2024 was bounded by a window of its own rather than by the
+/// present, so it vouches for nothing past 2024, however recently it ran.
 bool _isFresh(
   List<CoverageRange> coverage, {
   required DateTime from,
@@ -123,9 +128,15 @@ bool _isFresh(
       nearestTheEnd = range;
     }
   }
+  if (nearestTheEnd == null) return false;
 
-  return nearestTheEnd != null &&
-      now.difference(nearestTheEnd.completedAt) < maxStaleness;
+  final completedAt = nearestTheEnd.completedAt;
+  final endThen = to.isBefore(completedAt) ? to : completedAt;
+
+  // A range ends on a whole second where completedAt keeps its milliseconds,
+  // so reaching the end is only ever true to the grain.
+  return !nearestTheEnd.to.add(grain).isBefore(endThen) &&
+      now.difference(completedAt) < maxStaleness;
 }
 
 Duration _giftWrapMargin(Filter filter) =>
