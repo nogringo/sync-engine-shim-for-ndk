@@ -1,3 +1,20 @@
+## 0.4.0
+
+- A held request now revisits its windows on its own, every `maxStaleness`, for
+  as long as the engine is started. `ensure` meant *keep this available* but
+  only ever filled what was missing at the moment it was called: staying up to
+  date was left to an app writing a timer of its own. `maxStaleness` is now
+  both the freshness asked for and the period paid for. `stop` stops the
+  ticking, `start` picks it up.
+- `SyncEngine` takes a `minRevisitPeriod`, 15 seconds by default. Under it a
+  poll is a subscription written the wrong way round, and the engine cannot
+  subscribe yet, so a shorter `maxStaleness` is honoured as this floor rather
+  than spinning.
+- A window whose `until` is in the past no longer goes stale once it is covered
+  to its end, and a request whose windows have all closed stops going back to
+  the relays. An archive was refetching its trailing overlap on every pass, and
+  would have been polled for good. `refresh` still reopens it.
+
 ## 0.3.2
 
 - Staleness is measured on the coverage nearest the end of the window being

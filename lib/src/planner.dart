@@ -112,6 +112,11 @@ SyncTask _task(String relayUrl, Filter filter, DateTime since, DateTime until) {
 /// That range must also have gone as far as the window reached when it ran.
 /// One stopping in 2024 was bounded by a window of its own rather than by the
 /// present, so it vouches for nothing past 2024, however recently it ran.
+///
+/// A window whose `until` was already past when that range ran has no present
+/// to catch up with, so once covered to its end it stays fresh however old
+/// that coverage gets. Only [Duration.zero], the refresh gesture, goes back to
+/// it.
 bool _isFresh(
   List<CoverageRange> coverage, {
   required DateTime from,
@@ -135,8 +140,14 @@ bool _isFresh(
 
   // A range ends on a whole second where completedAt keeps its milliseconds,
   // so reaching the end is only ever true to the grain.
-  return !nearestTheEnd.to.add(grain).isBefore(endThen) &&
-      now.difference(completedAt) < maxStaleness;
+  if (nearestTheEnd.to.add(grain).isBefore(endThen)) return false;
+
+  // A window already closed when that range ran has no present to catch up
+  // with, so reaching its end settles it for good. One still open back then
+  // stopped at the present of the day, and vouches for nothing since.
+  if (to.isBefore(now) && !to.isAfter(completedAt)) return true;
+
+  return now.difference(completedAt) < maxStaleness;
 }
 
 Duration _giftWrapMargin(Filter filter) =>

@@ -27,6 +27,7 @@ class SyncEngine {
     this.ndk, {
     required Database db,
     this.maxStaleness = const Duration(minutes: 5),
+    this.minRevisitPeriod = const Duration(seconds: 15),
     this.overlapMargin = const Duration(days: 1),
     this.initialBackoff = const Duration(seconds: 5),
     this.maxBackoff = const Duration(minutes: 5),
@@ -37,8 +38,16 @@ class SyncEngine {
   final Ndk ndk;
   final SyncStore store;
 
-  /// How old coverage may get before [ensure] goes back to the relays.
+  /// How old coverage may get before the engine goes back to the relays. It is
+  /// both what [ensure] checks and how often a registered request revisits its
+  /// windows on its own, down to [minRevisitPeriod].
   final Duration maxStaleness;
+
+  /// Floor under the revisiting, whatever [maxStaleness] asks for. Polling
+  /// faster than this is not polling any more, it is a subscription written
+  /// the wrong way round, and the engine does not know how to subscribe yet.
+  /// The floor goes the day it does.
+  final Duration minRevisitPeriod;
 
   /// How far back a new pass reaches beyond existing coverage, to absorb clock
   /// skew and late deliveries.
@@ -80,9 +89,16 @@ class SyncEngine {
   }
 
   /// Stops the work, at the next page of whatever is walking. Handles and
-  /// persisted state survive, and [start] picks up where this left off.
+  /// persisted state survive, and [start] picks up where this left off. This
+  /// is what an app backgrounding itself calls: no request keeps ticking.
   Future<void> stop() async {
     _started = false;
+
+    // Nothing can arm a new one now that the engine is stopped.
+    for (final registration in _registrations.values) {
+      registration.tick?.cancel();
+      registration.tick = null;
+    }
 
     await _inFlight();
 
@@ -96,13 +112,16 @@ class SyncEngine {
     _publishEngineStatus();
   }
 
-  /// Keeps [request] available in the cache: the engine fills whatever is
-  /// missing, down to each filter's `since`. Cheap to call repeatedly, it only
-  /// goes to the relays when coverage is incomplete or older than
-  /// [maxStaleness]. The same request yields the same handle until released.
+  /// Keeps [request] available in the cache, and keeps it up to date: the
+  /// engine fills whatever is missing, down to each filter's `since`, then
+  /// revisits the recent end every [maxStaleness] for as long as the handle is
+  /// held. Cheap to call repeatedly, it only goes to the relays when coverage
+  /// is incomplete or stale. The same request yields the same handle until
+  /// released.
   ///
-  /// No live subscription for now, so events published afterwards show up on a
-  /// later call, once coverage went stale.
+  /// No live subscription for now, so an event published afterwards lands
+  /// within [maxStaleness] rather than the moment it is signed. [refresh] is
+  /// there for when that wait is too long.
   SyncHandle ensure(SyncRequest request) {
     final id = request.id ?? _identityOf(request);
     final existing = _registrations[id];
@@ -153,6 +172,7 @@ class SyncEngine {
     if (registration.holders > 0) return;
 
     registration.cancelled = true;
+    registration.tick?.cancel();
     _registrations.remove(handle.id);
     unawaited(registration.subject.close());
     _publishEngineStatus();
@@ -193,6 +213,7 @@ class SyncEngine {
       registration.running = null;
       _passes.remove(landed.future);
       landed.complete();
+      _scheduleTick(id);
       _publishEngineStatus();
     });
 
@@ -202,8 +223,49 @@ class SyncEngine {
     return pass;
   }
 
+  /// Arms the pass that will follow the one that just ran, so that a held
+  /// request keeps up with the relays without the app asking again.
+  ///
+  /// A request whose windows have all closed and whose last pass found nothing
+  /// left to fetch is done for good: it stops ticking instead of polling an
+  /// archive until the app quits. An open window always ticks on, since the
+  /// world keeps publishing into it.
+  void _scheduleTick(String id) {
+    final registration = _registrations[id];
+    if (registration == null || !_started) return;
+
+    registration.tick?.cancel();
+    registration.tick = null;
+
+    final request = registration.request;
+    final now = DateTime.now().toUtc();
+    final open = request.filters.any((filter) => _isOpen(filter, now));
+    if (!open && !registration.planned) return;
+
+    final asked = request.maxStaleness ?? maxStaleness;
+    final period = asked < minRevisitPeriod ? minRevisitPeriod : asked;
+
+    registration.tick = Timer(period, () {
+      registration.tick = null;
+      unawaited(_sync(id));
+    });
+  }
+
+  /// Whether [filter] still reaches into the future, and so may gain events
+  /// the engine has never seen. A window closed before [now] cannot.
+  bool _isOpen(Filter filter, DateTime now) {
+    final until = filter.until;
+    if (until == null) return true;
+
+    return DateTime.fromMillisecondsSinceEpoch(
+      until * 1000,
+      isUtc: true,
+    ).isAfter(now);
+  }
+
   Future<void> _pass(_Registration registration, Duration? staleness) async {
     final startedAt = DateTime.now().toUtc();
+    registration.planned = false;
     _emit(registration, phase: SyncRequestPhase.syncing);
 
     // Waiting on every relay of the request only gates this status update.
@@ -260,6 +322,8 @@ class SyncEngine {
         maxStaleness: staleness ?? request.maxStaleness ?? maxStaleness,
         overlapMargin: request.overlapMargin ?? overlapMargin,
       );
+
+      if (tasks.isNotEmpty) registration.planned = true;
 
       for (final task in tasks) {
         final result = await _runner.run(
@@ -460,6 +524,13 @@ class _Registration {
   var cancelled = false;
 
   Future<void>? running;
+
+  /// Whether the last pass had anything to fetch. Read once it lands, to tell
+  /// a request that still has work to do from one that is over.
+  var planned = false;
+
+  /// Armed between two automatic passes, never while one runs.
+  Timer? tick;
 
   /// What the next status will be built from, so that reporting a page does
   /// not have to restate the phase, nor the other way round.

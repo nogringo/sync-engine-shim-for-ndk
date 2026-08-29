@@ -54,11 +54,15 @@ sure the cache holds what you asked for.
 
 ## ensure, refresh, release
 
-`ensure` is a declaration, not a command: *keep this available locally*. It is
-cheap to call repeatedly, from a widget build or an `initState`, because it only
-goes to the relays when something is actually missing or stale. Calling it twice
-with the same filters and relays gives the same handle back, whatever the order
-of the lists.
+`ensure` is a declaration, not a command: *keep this available locally, and keep
+it up to date*. It is cheap to call repeatedly, from a widget build or an
+`initState`, because it only goes to the relays when something is actually
+missing or stale. Calling it twice with the same filters and relays gives the
+same handle back, whatever the order of the lists.
+
+Once the backfill is done the engine keeps going on its own, revisiting the
+recent end of every window it holds. Your app has no timer to write: what it
+declared stays true without it asking again.
 
 `refresh` is the pull to refresh gesture: go and look now, however fresh the
 coverage is.
@@ -71,8 +75,10 @@ asked twice.
 
 `release` drops your interest in a handle. A handle survives until its last
 holder releases it, and what was synced stays in the database either way. A walk
-still running stops at its next page, so leaving a screen stops spending network
-on it. Same for `stop`, which drops what is in flight instead of waiting it out.
+still running stops at its next page, and the request stops revisiting, so
+leaving a screen stops spending network on it. Same for `stop`, which drops what
+is in flight instead of waiting it out: that is what an app going to the
+background calls, and `start` picks the ticking back up.
 
 ## How far back, and how often
 
@@ -105,17 +111,46 @@ Two durations drive the rest, given to the engine and overridable per request:
 SyncEngine(
   ndk,
   db: db,
-  maxStaleness: const Duration(minutes: 5), // before the recent end is revisited
+  maxStaleness: const Duration(minutes: 5), // how often the recent end is revisited
   overlapMargin: const Duration(days: 1),   // how far back a window reaches beyond
 );                                          // what is strictly missing
 ```
 
 `maxStaleness` is measured on when the coverage was last validated, not on how
-far it reaches. Coverage brought right up to the present still goes stale.
+far it reaches. Coverage brought right up to the present still goes stale, and
+that is what the engine goes back for: a held request revisits its windows every
+`maxStaleness`, so the cache is never further behind the relays than that. It is
+the freshness you ask for and the period you pay for, in one number.
 
 `overlapMargin` exists because an event can reach a relay long after its
 `created_at`. Refetching a little further back than necessary is what catches
 those.
+
+A third duration is the floor under all this:
+
+```dart
+SyncEngine(ndk, db: db, minRevisitPeriod: const Duration(seconds: 15));
+```
+
+Asking to be fresher than that is asking for a subscription, which this package
+does not hold yet, and answering it with a faster poll would only be a bad
+imitation of one. So a shorter `maxStaleness` is honoured as `minRevisitPeriod`,
+`Duration.zero` included. Lower the floor if you know what you are asking your
+relays for. It goes away the day the engine learns to subscribe.
+
+## Windows that close
+
+Nothing of this outlives a window. A filter whose `until` is in the past, once
+covered to its end, is finished: it never goes stale again, and the request
+stops going back to the relays once its last window has closed. An archive is
+not something to poll.
+
+That means a note published at 23:59 but reaching the relay at 00:05 is missed
+by a window closing at midnight. `refresh` is the way back in, and it ignores
+this rule like it ignores `maxStaleness`.
+
+A window reaching into the future is open, so `until` set to tonight keeps
+ticking all day and closes itself when the day is over.
 
 ## Gift wraps
 
@@ -141,8 +176,10 @@ restarting tries again straight away.
 
 ## What it does not do yet
 
-- **No live subscription.** New events show up on a later `ensure`, once the
-  coverage went stale, or right away on a `refresh`.
+- **No live subscription.** The engine polls, it does not hold a subscription
+  open, so a new event lands within `maxStaleness` rather than the second it is
+  signed, and never faster than `minRevisitPeriod`. `refresh` is there for when
+  that wait is too long.
 - **No broadcast.** Downwards only.
 - **No NIP-42 authentication.** `SyncRequest.authPubkey` only keeps the sync
   state of an authenticated relay separate from the anonymous one, it does not

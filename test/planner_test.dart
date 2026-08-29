@@ -177,6 +177,55 @@ void main() {
     expect(tasks.single.filter.until, seconds(now));
   });
 
+  test('never goes stale on a window that closed in the past', () {
+    final since = ago(const Duration(days: 30));
+    final until = ago(const Duration(days: 20));
+    final lastFetch = ago(const Duration(days: 19));
+    final state = stateWith([covered(since, until, completedAt: lastFetch)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since), until: seconds(until)),
+      state: state,
+    );
+
+    expect(
+      tasks,
+      isEmpty,
+      reason:
+          'that window has no present to catch up with, so however old the '
+          'coverage gets there is nothing new to find in it',
+    );
+  });
+
+  test('goes back to a closed window when staleness is zero', () {
+    final since = ago(const Duration(days: 30));
+    final until = ago(const Duration(days: 20));
+    final lastFetch = ago(const Duration(days: 19));
+    final state = stateWith([covered(since, until, completedAt: lastFetch)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since), until: seconds(until)),
+      state: state,
+      staleness: Duration.zero,
+    );
+
+    expect(tasks.single.filter.until, seconds(until));
+  });
+
+  test('finishes a closed window covered short of its end', () {
+    final since = ago(const Duration(days: 30));
+    final until = ago(const Duration(days: 20));
+    final reached = ago(const Duration(days: 25));
+    final state = stateWith([covered(since, reached, completedAt: reached)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since), until: seconds(until)),
+      state: state,
+    );
+
+    expect(tasks.single.filter.until, seconds(until));
+  });
+
   test('always plans a hole inside the covered period, however small', () {
     final since = ago(const Duration(days: 30));
     final hole = ago(const Duration(days: 20));
