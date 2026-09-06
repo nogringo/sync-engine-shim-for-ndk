@@ -46,6 +46,22 @@ class SyncStore {
         .put(db, _syncStateTo(state));
   }
 
+  Future<void> deleteSyncState({
+    required String relayUrl,
+    required String filterFingerprint,
+    String? authPubkey,
+  }) async {
+    await _syncStates
+        .record(
+          _syncStateKey(
+            relayUrl: relayUrl,
+            filterFingerprint: filterFingerprint,
+            authPubkey: authPubkey,
+          ),
+        )
+        .delete(db);
+  }
+
   Future<RelayKnowledge?> readRelayKnowledge(String relayUrl) async {
     final record = await _relayKnowledge.record(_relayKey(relayUrl)).get(db);
 
@@ -57,6 +73,12 @@ class SyncStore {
         .record(_relayKey(knowledge.relayUrl))
         .put(db, _relayKnowledgeTo(knowledge));
   }
+
+  /// Drops everything this package persisted. Local only.
+  Future<void> clear() => db.transaction((txn) async {
+    await _syncStates.drop(txn);
+    await _relayKnowledge.drop(txn);
+  });
 
   /// Fixed width fields first, and `|` as separator: a relay url carries its
   /// own colons, in `wss://` and in a non default port.

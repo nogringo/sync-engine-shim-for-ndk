@@ -80,6 +80,18 @@ leaving a screen stops spending network on it. Same for `stop`, which drops what
 is in flight instead of waiting it out: that is what an app going to the
 background calls, and `start` picks the ticking back up.
 
+`forget` drops what was synced for a request, so its next pass walks it back
+from scratch. It takes the request rather than a handle: the time to forget is
+after the last screen released it, as when an account is removed. Coverage is
+per filter and relay, not per window, so every window of those filters on those
+relays goes.
+
+`clearAllLocalData` forgets everything the engine persisted: that is what a full
+app reset calls. Held handles start over.
+
+Both are local only. The NDK cache is yours, so clear it too, and clear both or
+none: a cache emptied under a coverage that survived is never fetched again.
+
 ## How far back, and how often
 
 How far back a request reaches is bounded by each filter's own `since`. Without

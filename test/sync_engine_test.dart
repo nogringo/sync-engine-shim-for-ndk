@@ -1,6 +1,7 @@
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
 import 'package:sembast/sembast_memory.dart' hide Filter;
+import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
 import 'package:sync_engine_shim_for_ndk/sync_engine_shim_for_ndk.dart';
 import 'package:test/test.dart';
 
@@ -206,6 +207,114 @@ void main() {
       await cache.loadEvents(kinds: [1]),
       hasLength(1),
       reason: 'coverage is younger than maxStaleness, nothing to do',
+    );
+  });
+
+  test('forget walks a held request back from scratch', () async {
+    await publish(relay, 'hello');
+    engine.start();
+
+    final request = SyncRequest(filters: [notes()], relays: [relay.url]);
+    final handle = engine.ensure(request);
+    await settled(handle);
+
+    await publish(relay, 'published later');
+    await engine.forget(request);
+    // forget restarted the pass, and the handle is syncing.
+    await settled(handle);
+
+    expect(
+      await cache.loadEvents(kinds: [1]),
+      hasLength(2),
+      reason: 'the coverage is gone, the relay is asked again',
+    );
+  });
+
+  test(
+    'forget drops the coverage of a released request, on its relays only',
+    () async {
+      final other = MockRelay(name: 'other');
+      await other.startServer();
+      addTearDown(other.stopServer);
+
+      engine.start();
+      final handle = engine.ensure(
+        SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+      );
+      await settled(handle);
+      engine.release(handle);
+
+      await engine.forget(SyncRequest(filters: [notes()], relays: [relay.url]));
+
+      Future<RelayFilterSyncState?> stateOn(String relayUrl) =>
+          engine.store.readSyncState(
+            relayUrl: relayUrl,
+            filterFingerprint: filterFingerprint(notes()),
+          );
+      expect(await stateOn(relay.url), isNull);
+      expect(await stateOn(other.url), isNotNull);
+    },
+  );
+
+  test('clearAllLocalData forgets the coverage and fetches again', () async {
+    await publish(relay, 'hello');
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+    await settled(handle);
+
+    await publish(relay, 'published later');
+    await engine.clearAllLocalData();
+    // The restart kicked off a pass, and the handle is syncing.
+    await settled(handle);
+
+    expect(
+      await cache.loadEvents(kinds: [1]),
+      hasLength(2),
+      reason: 'the coverage is gone, the relay is asked again',
+    );
+  });
+
+  test('clearAllLocalData leaves a stopped engine stopped', () async {
+    await engine.store.writeSyncState(
+      RelayFilterSyncState(relayUrl: relay.url, filterFingerprint: 'abc'),
+    );
+
+    await engine.clearAllLocalData();
+
+    expect(
+      await engine.store.readSyncState(
+        relayUrl: relay.url,
+        filterFingerprint: 'abc',
+      ),
+      isNull,
+    );
+    expect(engine.engineStatus.phase, SyncEnginePhase.stopped);
+  });
+
+  test('clearAllLocalData waits for a walk in flight', () async {
+    final slow = MockRelay(name: 'slow');
+    await slow.startServer(delayResponse: const Duration(seconds: 2));
+    addTearDown(slow.stopServer);
+
+    engine.start();
+    engine.ensure(SyncRequest(filters: [notes()], relays: [slow.url]));
+
+    while (slow.connectedClientCount == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+
+    final clock = Stopwatch()..start();
+    await engine.clearAllLocalData();
+    await engine.stop();
+
+    expect(
+      clock.elapsed,
+      greaterThan(const Duration(seconds: 1)),
+      reason: 'the page in flight landed before the store was emptied',
     );
   });
 

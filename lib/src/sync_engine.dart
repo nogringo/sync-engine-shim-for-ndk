@@ -178,6 +178,53 @@ class SyncEngine {
     _publishEngineStatus();
   }
 
+  /// Forgets what was synced for [request], so its next pass walks it back
+  /// from scratch. Coverage is per filter and relay, not per window: every
+  /// window of these filters on these relays goes. Local only.
+  Future<void> forget(SyncRequest request) async {
+    final id = request.id ?? _identityOf(request);
+    final registration = _registrations[id];
+    if (registration == null) return _forget(request);
+
+    await registration.running;
+    // The pass that just landed re-armed the tick.
+    registration.tick?.cancel();
+    registration.tick = null;
+
+    // A pass asked meanwhile joins the wipe instead of walking a state half gone.
+    final wipe = _forget(request);
+    registration.running = wipe;
+    try {
+      await wipe;
+    } finally {
+      registration.running = null;
+    }
+
+    unawaited(_sync(id));
+  }
+
+  Future<void> _forget(SyncRequest request) async {
+    for (final relayUrl in request.relays) {
+      for (final filter in request.filters) {
+        await store.deleteSyncState(
+          relayUrl: relayUrl,
+          filterFingerprint: filterFingerprint(filter),
+          authPubkey: request.authPubkey,
+        );
+      }
+    }
+  }
+
+  /// Forgets everything this package persisted, for a full app reset. Local
+  /// only. Walks in flight land first, and held requests start over.
+  Future<void> clearAllLocalData() async {
+    final wasStarted = _started;
+
+    await stop();
+    await store.clear();
+    if (wasStarted) start();
+  }
+
   SyncEngineStatus get engineStatus => _engineStatus.value;
 
   Stream<SyncEngineStatus> watchEngineStatus() => _engineStatus.stream;

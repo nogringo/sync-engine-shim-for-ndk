@@ -142,6 +142,50 @@ void main() {
     });
   });
 
+  group('delete sync state', () {
+    test('forgets one state and leaves the others', () async {
+      await store.writeSyncState(
+        RelayFilterSyncState(
+          relayUrl: relay,
+          filterFingerprint: fingerprint,
+          authPubkey: alice,
+        ),
+      );
+      await store.writeSyncState(
+        RelayFilterSyncState(relayUrl: relay, filterFingerprint: fingerprint),
+      );
+
+      await store.deleteSyncState(
+        relayUrl: relay,
+        filterFingerprint: fingerprint,
+        authPubkey: alice,
+      );
+
+      expect(
+        await store.readSyncState(
+          relayUrl: relay,
+          filterFingerprint: fingerprint,
+          authPubkey: alice,
+        ),
+        isNull,
+      );
+      expect(
+        await store.readSyncState(
+          relayUrl: relay,
+          filterFingerprint: fingerprint,
+        ),
+        isNotNull,
+      );
+    });
+
+    test('is safe when nothing was written', () async {
+      await store.deleteSyncState(
+        relayUrl: relay,
+        filterFingerprint: fingerprint,
+      );
+    });
+  });
+
   group('relay knowledge', () {
     test('round trips', () async {
       await store.writeRelayKnowledge(
@@ -171,6 +215,43 @@ void main() {
     });
 
     test('returns null when nothing was written', () async {
+      expect(await store.readRelayKnowledge(relay), isNull);
+    });
+  });
+
+  group('clear', () {
+    test('forgets both stores', () async {
+      await store.writeSyncState(
+        RelayFilterSyncState(
+          relayUrl: relay,
+          filterFingerprint: fingerprint,
+          authPubkey: alice,
+          coverage: [
+            CoverageRange(from: january, to: march, completedAt: april),
+          ],
+        ),
+      );
+      await store.writeRelayKnowledge(
+        RelayKnowledge(relayUrl: relay, lastConnectedAt: april),
+      );
+
+      await store.clear();
+
+      expect(
+        await store.readSyncState(
+          relayUrl: relay,
+          filterFingerprint: fingerprint,
+          authPubkey: alice,
+        ),
+        isNull,
+      );
+      expect(await store.readRelayKnowledge(relay), isNull);
+    });
+
+    test('is safe on an empty store', () async {
+      await store.clear();
+      await store.clear();
+
       expect(await store.readRelayKnowledge(relay), isNull);
     });
   });

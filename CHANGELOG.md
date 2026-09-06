@@ -1,3 +1,12 @@
+## 0.5.0
+
+- `SyncEngine.clearAllLocalData` forgets everything the engine persisted, for
+  a full app reset. Local only, the NDK cache is the app's to clear. A cache
+  emptied under a coverage that survived was never fetched again.
+- `SyncEngine.forget` does the same for one request, held or not. This is how
+  an app scopes the cleanup to one account: authors are hashed into the
+  fingerprint, so the engine cannot do it on its own.
+
 ## 0.4.0
 
 - A held request now revisits its windows on its own, every `maxStaleness`, for
