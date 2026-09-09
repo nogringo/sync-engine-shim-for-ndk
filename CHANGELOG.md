@@ -1,4 +1,4 @@
-## Unreleased
+## 0.6.0
 
 - Coverage is only recorded when the relay sent an EOSE. An empty answer used
   to be the proof that a relay had nothing left, and a relay refusing a request
@@ -11,6 +11,19 @@
 - Depend on `ndk` 0.10.0-dev.1, which reports what each relay did with a
   request. The timeout and connectivity heuristics that stood in for it are
   gone.
+- `SyncRequest.authPubkey` authenticates (NIP-42). It is resolved against
+  `ndk.accounts` when the request runs rather than when it is registered, so a
+  request declared before the login authenticates on its next pass, bound to
+  that identity from the first page. Nothing watches for the login, so a pass
+  that is worth having straight away is one `refresh` away.
+- A request naming nobody never sends an AUTH, whoever is logged in. Saying
+  nothing was not neutral: a refused request authenticated as the logged
+  account, and the anonymous state filled with data served under an identity.
+- A request whose pubkey ndk does not have, or cannot sign with, reads nothing
+  and reports a `SyncAuthUnavailable` on `SyncRequestStatus.lastError`. Reading
+  anonymously would file the answers under an identity that never signed for
+  them, and nothing afterwards could tell. The relay is left alone, backoff
+  included: the configuration is what is wrong, not the relay.
 
 ## 0.5.0
 

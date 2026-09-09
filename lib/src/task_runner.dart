@@ -57,13 +57,19 @@ class TaskRunner {
   /// [isCancelled] is read between pages, which is the only place a walk can
   /// be dropped without losing the page in flight. A long backfill therefore
   /// stops within one page rather than running on after the caller left.
+  ///
+  /// [auth] is both what goes on the wire and what the coverage is filed under,
+  /// so a window can only be recorded against the identity that read it. It is
+  /// never null: a request that says nothing to ndk still authenticates as the
+  /// logged account once a relay refuses it.
   Future<TaskOutcome> run(
     SyncTask task, {
-    String? authPubkey,
+    RelayAuth auth = const RelayAuth.never(),
     required DateTime startedAt,
     bool Function()? isCancelled,
     void Function(SyncProgress)? onProgress,
   }) async {
+    final authPubkey = auth.account?.pubkey;
     final fingerprint = filterFingerprint(task.filter);
     // No `since` on the task means the window opens at the epoch.
     final since = task.filter.since ?? 0;
@@ -80,6 +86,7 @@ class TaskRunner {
         cacheRead: false,
         cacheWrite: true,
         timeout: timeout,
+        auth: auth,
       );
 
       final events = await response.future;

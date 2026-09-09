@@ -189,6 +189,124 @@ void main() {
     expect((await settled(handle)).phase, SyncRequestPhase.failed);
   });
 
+  test('syncs a gated relay as the account the request names', () async {
+    final gated = MockRelay(name: 'gated', requireAuthForRequests: true);
+    await gated.startServer();
+    addTearDown(gated.stopServer);
+    await publish(gated, 'hello');
+
+    ndk.accounts.loginPrivateKey(
+      pubkey: author.publicKey,
+      privkey: author.privateKey!,
+    );
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(
+        filters: [notes()],
+        relays: [gated.url],
+        authPubkey: author.publicKey,
+      ),
+    );
+
+    expect((await settled(handle)).phase, SyncRequestPhase.synced);
+    expect(gated.connectionsAuthenticatedAs(author.publicKey), 1);
+    expect(await cache.loadEvents(kinds: [1]), hasLength(1));
+  });
+
+  test('reads nothing when ndk has no account for the request', () async {
+    await publish(relay, 'hello');
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(
+        filters: [notes()],
+        relays: [relay.url],
+        authPubkey: author.publicKey,
+      ),
+    );
+    final status = await settled(handle);
+
+    expect(status.phase, SyncRequestPhase.failed);
+    expect(
+      status.lastError,
+      isA<SyncAuthUnavailable>()
+          .having((error) => error.pubkey, 'pubkey', author.publicKey)
+          .having(
+            (error) => error.reason,
+            'reason',
+            SyncAuthFailure.unknownAccount,
+          ),
+    );
+    expect(
+      relay.subscriptionsRequestedOutside(author.publicKey),
+      isEmpty,
+      reason: 'reading anonymously would file the answers under that pubkey',
+    );
+    expect(status.relayStates, isEmpty);
+    expect(await cache.loadEvents(kinds: [1]), isEmpty);
+  });
+
+  test('reads nothing when the named account cannot sign', () async {
+    await publish(relay, 'hello');
+    ndk.accounts.loginPublicKey(pubkey: author.publicKey);
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(
+        filters: [notes()],
+        relays: [relay.url],
+        authPubkey: author.publicKey,
+      ),
+    );
+    final status = await settled(handle);
+
+    expect(status.phase, SyncRequestPhase.failed);
+    expect(
+      status.lastError,
+      isA<SyncAuthUnavailable>().having(
+        (error) => error.reason,
+        'reason',
+        SyncAuthFailure.cannotSign,
+      ),
+    );
+    expect(relay.subscriptionsRequestedOutside(author.publicKey), isEmpty);
+  });
+
+  test('picks up the account on its own once it appears', () async {
+    final gated = MockRelay(name: 'gated', requireAuthForRequests: true);
+    await gated.startServer();
+    addTearDown(gated.stopServer);
+    await publish(gated, 'hello');
+
+    engine.start();
+    final handle = engine.ensure(
+      SyncRequest(
+        filters: [notes()],
+        relays: [gated.url],
+        authPubkey: author.publicKey,
+        maxStaleness: Duration.zero,
+      ),
+    );
+
+    expect((await settled(handle)).phase, SyncRequestPhase.failed);
+
+    final synced = engine
+        .watchStatus(handle)
+        .firstWhere((status) => status.phase == SyncRequestPhase.synced);
+    ndk.accounts.loginPrivateKey(
+      pubkey: author.publicKey,
+      privkey: author.privateKey!,
+    );
+
+    expect(
+      (await synced).lastError,
+      isNull,
+      reason: 'a request declared before the login recovers by itself',
+    );
+    expect(gated.connectionsAuthenticatedAs(author.publicKey), 1);
+  });
+
   test('does not query again while coverage is fresh', () async {
     await publish(relay, 'hello');
     engine.start();

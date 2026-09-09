@@ -82,10 +82,12 @@ void main() {
   Future<List<({int from, int to})>> coverageOf(
     Filter filter, {
     String? relayUrl,
+    String? authPubkey,
   }) async {
     final state = await store.readSyncState(
       relayUrl: relayUrl ?? relay.url,
       filterFingerprint: filterFingerprint(filter),
+      authPubkey: authPubkey,
     );
 
     return [
@@ -218,6 +220,64 @@ void main() {
 
     expect(await runner.run(task, startedAt: startedAt), TaskOutcome.refused);
     expect(await coverageOf(task.filter, relayUrl: gated.url), isEmpty);
+  });
+
+  test('covers a gated window as the account the request names', () async {
+    final gated = MockRelay(name: 'gated', requireAuthForRequests: true);
+    await gated.startServer();
+    addTearDown(gated.stopServer);
+
+    ndk.accounts.loginPrivateKey(
+      pubkey: author.publicKey,
+      privkey: author.privateKey!,
+    );
+
+    final task = taskFor(gated.url, since: at(3600), until: at(0));
+    final outcome = await runner.run(
+      task,
+      auth: RelayAuth.require(ndk.accounts.accounts[author.publicKey]!),
+      startedAt: startedAt,
+    );
+
+    expect(outcome, TaskOutcome.answered);
+    expect(gated.connectionsAuthenticatedAs(author.publicKey), 1);
+    expect(
+      await coverageOf(
+        task.filter,
+        relayUrl: gated.url,
+        authPubkey: author.publicKey,
+      ),
+      [(from: at(3600), to: at(0))],
+    );
+  });
+
+  test('never authenticates a task that did not ask to', () async {
+    final gated = MockRelay(name: 'gated', requireAuthForRequests: true);
+    await gated.startServer();
+    addTearDown(gated.stopServer);
+
+    ndk.accounts.loginPrivateKey(
+      pubkey: author.publicKey,
+      privkey: author.privateKey!,
+    );
+
+    final task = taskFor(gated.url, since: at(3600), until: at(0));
+
+    expect(
+      await runner.run(task, startedAt: startedAt),
+      TaskOutcome.refused,
+      reason: 'the logged account is not this task\'s business',
+    );
+    expect(gated.acceptedAuths, 0);
+    expect(gated.connectionsAuthenticatedAs(author.publicKey), 0);
+    expect(
+      await coverageOf(
+        task.filter,
+        relayUrl: gated.url,
+        authPubkey: author.publicKey,
+      ),
+      isEmpty,
+    );
   });
 
   test('remembers the attempt even when the relay refused', () async {

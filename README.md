@@ -186,6 +186,21 @@ relay answers. Your app has nothing to call back: a request that failed while
 the train was in a tunnel recovers by itself. The backoff lives in memory, so
 restarting tries again straight away.
 
+## Authenticating
+
+`SyncRequest.authPubkey` names the identity a request goes out under. It is
+looked up in `ndk.accounts` when the request runs, not when it is registered, so
+a request declared before the login is not lost: it authenticates on its next
+pass, within `maxStaleness`. Nothing watches for the login, so `refresh` is what
+turns that wait into nothing. Coverage stays filed under that pubkey, separate
+from the anonymous one, since a relay may well serve two different things.
+
+A request that names nobody never sends an AUTH, whoever happens to be logged
+in. A request that names a pubkey ndk cannot sign with reads nothing at all: it
+reports a `SyncAuthUnavailable` on `SyncRequestStatus.lastError` and leaves the
+relay alone, rather than reading anonymously and filing the answers under an
+identity that never signed for them.
+
 ## What it does not do yet
 
 - **No live subscription.** The engine polls, it does not hold a subscription
@@ -193,9 +208,6 @@ restarting tries again straight away.
   signed, and never faster than `minRevisitPeriod`. `refresh` is there for when
   that wait is too long.
 - **No broadcast.** Downwards only.
-- **No NIP-42 authentication.** `SyncRequest.authPubkey` only keeps the sync
-  state of an authenticated relay separate from the anonymous one, it does not
-  authenticate anything yet.
 - **The filter's `limit` is ignored.** It is not part of what identifies a
   filter, so honouring it would let a capped request mark a window as covered
   and leave an uncapped one believing there is nothing left to fetch.

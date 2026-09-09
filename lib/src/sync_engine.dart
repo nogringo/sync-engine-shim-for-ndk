@@ -6,6 +6,7 @@ import 'package:ndk/shared/helpers/relay_helper.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:sembast/sembast.dart' hide Filter;
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
+import 'package:sync_engine_shim_for_ndk/src/entities/sync_auth_error.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_engine_status.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_handle.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
@@ -313,7 +314,20 @@ class SyncEngine {
   Future<void> _pass(_Registration registration, Duration? staleness) async {
     final startedAt = DateTime.now().toUtc();
     registration.planned = false;
+    registration.lastError = null;
     _emit(registration, phase: SyncRequestPhase.syncing);
+
+    final RelayAuth auth;
+    try {
+      auth = _authFor(registration.request);
+    } on SyncAuthUnavailable catch (error) {
+      registration.lastError = error;
+      // Nothing was read, so everything is still to do: keep ticking, the
+      // account may show up between two passes.
+      registration.planned = true;
+      _emit(registration, phase: SyncRequestPhase.failed);
+      return;
+    }
 
     // Waiting on every relay of the request only gates this status update.
     // Each relay keeps draining its own queue meanwhile.
@@ -321,7 +335,7 @@ class SyncEngine {
       for (final relayUrl in registration.request.relays)
         _enqueue(
           relayUrl,
-          () => _syncRelay(registration, relayUrl, staleness, startedAt),
+          () => _syncRelay(registration, relayUrl, staleness, startedAt, auth),
         ),
     ]);
 
@@ -342,12 +356,45 @@ class SyncEngine {
     );
   }
 
+  /// The identity a request goes out under, resolved at query time rather than
+  /// at registration: a request declared before its account exists starts
+  /// authenticating on its own as soon as the account shows up.
+  ///
+  /// A request naming nobody gets [RelayAuth.never]. Saying nothing to ndk is
+  /// not the same: it would authenticate as the logged account on a refusal,
+  /// and the anonymous state would fill with data served under an identity.
+  RelayAuth _authFor(SyncRequest request) {
+    final pubkey = request.authPubkey;
+    if (pubkey == null) return const RelayAuth.never();
+
+    final account = ndk.accounts.accounts[pubkey];
+    if (account == null) {
+      throw SyncAuthUnavailable(
+        pubkey: pubkey,
+        reason: SyncAuthFailure.unknownAccount,
+      );
+    }
+
+    // Left to ndk this would reach no relay at all, and a task reaching no
+    // relay reads as unreachable: a misconfiguration would land in the backoff
+    // of a relay that did nothing wrong.
+    if (!account.signer.canSign()) {
+      throw SyncAuthUnavailable(
+        pubkey: pubkey,
+        reason: SyncAuthFailure.cannotSign,
+      );
+    }
+
+    return RelayAuth.require(account);
+  }
+
   /// Every filter of [registration] on this one relay, one after the other.
   Future<TaskOutcome> _syncRelay(
     _Registration registration,
     String relayUrl,
     Duration? staleness,
     DateTime startedAt,
+    RelayAuth auth,
   ) async {
     final request = registration.request;
     var outcome = TaskOutcome.answered;
@@ -375,7 +422,7 @@ class SyncEngine {
       for (final task in tasks) {
         final result = await _runner.run(
           task,
-          authPubkey: request.authPubkey,
+          auth: auth,
           startedAt: startedAt,
           isCancelled: cancelled,
           onProgress: (progress) => _emit(registration, progress: progress),
@@ -507,6 +554,7 @@ class SyncEngine {
         handle: registration.handle,
         phase: registration.phase,
         relayStates: registration.states,
+        lastError: registration.lastError,
         progress: registration.progress,
       ),
     );
@@ -597,6 +645,9 @@ class _Registration {
   var phase = SyncRequestPhase.idle;
   List<RelayFilterSyncState> states = const [];
   SyncProgress? progress;
+
+  /// Cleared when a pass starts, so a recovered request stops reporting it.
+  Object? lastError;
 }
 
 /// Serialises the work aimed at one relay, and carries that relay's backoff.
