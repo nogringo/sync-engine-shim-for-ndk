@@ -9,7 +9,16 @@ import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
 
 /// How a task ended. Giving up on purpose is not a failure: it must not count
 /// against the relay, which never did anything wrong.
-enum TaskOutcome { answered, unreachable, cancelled }
+enum TaskOutcome {
+  answered,
+
+  /// the relay ended the request with a CLOSED: it is up and answering, only
+  /// not this request, so waiting changes nothing until the request does
+  refused,
+
+  unreachable,
+  cancelled,
+}
 
 /// Runs planned tasks against the relays and records the ground covered.
 /// Events land in the NDK cache, this only keeps track of what was walked.
@@ -34,8 +43,13 @@ class TaskRunner {
   /// Walks [task]'s window from the recent end towards the old one, recording
   /// coverage page by page so an interrupted run keeps what it earned.
   ///
-  /// An empty page is the only signal that the relay has nothing left, and it
-  /// is what lets a window without a `since` be closed down to the epoch.
+  /// Only an EOSE records coverage. Anything else, a CLOSED, a dead socket or
+  /// a timeout, leaves the window as it was: a relay that refuses a request
+  /// returns no events either, and would otherwise pass for an exhausted one.
+  ///
+  /// Under an EOSE an empty page is the signal that the relay has nothing
+  /// left, and it is what lets a window without a `since` be closed down to
+  /// the epoch.
   ///
   /// Every page shares [startedAt] as its completedAt, which is what lets the
   /// pages merge back into a single range.
@@ -43,8 +57,6 @@ class TaskRunner {
   /// [isCancelled] is read between pages, which is the only place a walk can
   /// be dropped without losing the page in flight. A long backfill therefore
   /// stops within one page rather than running on after the caller left.
-  ///
-  /// Nothing is marked as covered when the relay could not be reached.
   Future<TaskOutcome> run(
     SyncTask task, {
     String? authPubkey,
@@ -60,28 +72,34 @@ class TaskRunner {
     while (true) {
       if (isCancelled?.call() ?? false) return TaskOutcome.cancelled;
 
-      var timedOut = false;
-      final events = await ndk.requests
-          .query(
-            filter: task.filter.clone()
-              ..until = until
-              ..limit = pageLimit,
-            explicitRelays: [task.relayUrl],
-            cacheRead: false,
-            cacheWrite: true,
-            timeout: timeout,
-            timeoutCallback: () => timedOut = true,
-          )
-          .future;
+      final response = ndk.requests.query(
+        filter: task.filter.clone()
+          ..until = until
+          ..limit = pageLimit,
+        explicitRelays: [task.relayUrl],
+        cacheRead: false,
+        cacheWrite: true,
+        timeout: timeout,
+      );
 
-      if (timedOut || !_isReachable(task.relayUrl)) {
+      final events = await response.future;
+      final outcomes = await response.relayOutcomesDone;
+      // The map is keyed by normalised url, and a relay nothing reached has no
+      // entry at all rather than a status saying so.
+      final status =
+          outcomes[cleanRelayUrl(task.relayUrl) ?? task.relayUrl]?.status;
+
+      if (status != RelayRequestStatus.eose) {
         await _record(
           relayUrl: task.relayUrl,
           fingerprint: fingerprint,
           authPubkey: authPubkey,
           startedAt: startedAt,
         );
-        return TaskOutcome.unreachable;
+
+        return status == RelayRequestStatus.closed
+            ? TaskOutcome.refused
+            : TaskOutcome.unreachable;
       }
 
       if (events.isEmpty) {
@@ -125,13 +143,6 @@ class TaskRunner {
       until = walkedFrom - 1;
     }
   }
-
-  /// NDK never says which relay sent the EOSE, so an exhausted relay and a
-  /// silent one look alike. Two partial signals cover each other: a timeout
-  /// catches a relay that answers nothing, and connectivity catches a request
-  /// that was dropped before reaching a socket, which ends without a timeout.
-  bool _isReachable(String relayUrl) =>
-      ndk.relays.isRelayConnected(cleanRelayUrl(relayUrl) ?? relayUrl);
 
   void _report(
     void Function(SyncProgress)? onProgress,

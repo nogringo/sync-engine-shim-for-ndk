@@ -170,6 +170,70 @@ void main() {
     expect(await coverageOf(task.filter, relayUrl: silent.url), isEmpty);
   });
 
+  test(
+    'records nothing when a reachable relay is stuck on the request',
+    () async {
+      final stuck = MockRelay(name: 'stuck', ignoreRequests: true);
+      await stuck.startServer();
+      addTearDown(stuck.stopServer);
+
+      final impatient = TaskRunner(
+        ndk: ndk,
+        store: store,
+        timeout: const Duration(milliseconds: 300),
+      );
+      final task = taskFor(stuck.url, since: at(3600), until: at(0));
+
+      expect(
+        await impatient.run(task, startedAt: startedAt),
+        TaskOutcome.unreachable,
+        reason: 'the REQ was taken and never answered, neither events nor EOSE',
+      );
+      expect(await coverageOf(task.filter, relayUrl: stuck.url), isEmpty);
+    },
+  );
+
+  test('refuses to cover a window the relay closed', () async {
+    relay.closeRequestsMessage = 'blocked: not for you';
+    final task = taskFor(relay.url, since: at(3600), until: at(0));
+
+    expect(
+      await runner.run(task, startedAt: startedAt),
+      TaskOutcome.refused,
+      reason: 'a refused request returns no events, like an exhausted relay',
+    );
+    expect(
+      await coverageOf(task.filter),
+      isEmpty,
+      reason: 'nothing was read, so nothing is covered',
+    );
+  });
+
+  test('refuses to cover a window a relay wants authentication for', () async {
+    final gated = MockRelay(name: 'gated', requireAuthForRequests: true);
+    await gated.startServer();
+    addTearDown(gated.stopServer);
+
+    final task = taskFor(gated.url, since: at(3600), until: at(0));
+
+    expect(await runner.run(task, startedAt: startedAt), TaskOutcome.refused);
+    expect(await coverageOf(task.filter, relayUrl: gated.url), isEmpty);
+  });
+
+  test('remembers the attempt even when the relay refused', () async {
+    relay.closeRequestsMessage = 'blocked: not for you';
+    final task = taskFor(relay.url, since: at(3600), until: at(0));
+
+    await runner.run(task, startedAt: startedAt);
+    final state = await store.readSyncState(
+      relayUrl: relay.url,
+      filterFingerprint: filterFingerprint(task.filter),
+    );
+
+    expect(state!.lastAttemptAt, startedAt);
+    expect(state.coverage, isEmpty);
+  });
+
   test('remembers the attempt even when it failed', () async {
     await relay.stopServer();
     final task = taskFor(relay.url, since: at(3600), until: at(0));

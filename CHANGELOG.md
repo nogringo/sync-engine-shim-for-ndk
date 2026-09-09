@@ -1,3 +1,17 @@
+## Unreleased
+
+- Coverage is only recorded when the relay sent an EOSE. An empty answer used
+  to be the proof that a relay had nothing left, and a relay refusing a request
+  returns no events either: the window was marked covered without a single
+  event being read, and covered ground is never fetched again.
+- A relay ending a request with a CLOSED is told apart from an unreachable one,
+  and leaves its backoff untouched. It is up and answering, only not this
+  request, so a retry would be refused again, and the backoff is per relay:
+  counting a refusal would slow down the windows that relay does serve.
+- Depend on `ndk` 0.10.0-dev.1, which reports what each relay did with a
+  request. The timeout and connectivity heuristics that stood in for it are
+  gone.
+
 ## 0.5.0
 
 - `SyncEngine.clearAllLocalData` forgets everything the engine persisted, for

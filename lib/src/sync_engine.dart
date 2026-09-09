@@ -381,8 +381,13 @@ class SyncEngine {
           onProgress: (progress) => _emit(registration, progress: progress),
         );
 
+        // Worst wins, and unreachable outranks refused: it is the one that has
+        // to reach the backoff.
         if (result == TaskOutcome.cancelled) return TaskOutcome.cancelled;
         if (result == TaskOutcome.unreachable) outcome = result;
+        if (result == TaskOutcome.refused && outcome == TaskOutcome.answered) {
+          outcome = result;
+        }
       }
     }
 
@@ -428,8 +433,16 @@ class SyncEngine {
   /// A relay that answers clears its own backoff. One that does not gets a
   /// wake up call, which re-runs every request wanting it. Giving up on
   /// purpose leaves the relay's standing untouched.
+  ///
+  /// So does a refusal, in both directions. Backoff is per relay, not per
+  /// filter, so counting a CLOSED would throttle the windows that same relay
+  /// serves, and retrying would only be refused again until the request
+  /// changes. Clearing it is no better: the pending timer is what the requests
+  /// waiting on a real disconnection are going to be woken by.
   void _noteAttempt(_RelayQueue queue, TaskOutcome outcome) {
-    if (outcome == TaskOutcome.cancelled) return;
+    if (outcome == TaskOutcome.cancelled || outcome == TaskOutcome.refused) {
+      return;
+    }
 
     if (outcome == TaskOutcome.answered) {
       queue.failures = 0;

@@ -537,6 +537,28 @@ void main() {
     expect(await cache.loadEvents(kinds: [1]), hasLength(1));
   });
 
+  test('does not retry a relay that refused the request', () async {
+    relay.closeRequestsMessage = 'blocked: not for you';
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+    expect((await settled(handle)).phase, SyncRequestPhase.failed);
+
+    // Nothing authenticates here, so this is every REQ the relay ever saw.
+    final requested = relay.subscriptionsRequestedOutside(author.publicKey);
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+
+    expect(
+      relay.subscriptionsRequestedOutside(author.publicKey),
+      requested,
+      reason:
+          'a refusal arms no backoff: the relay is up and would only refuse '
+          'again, and counting it would slow down the windows it does serve',
+    );
+  });
+
   test('stop gives up on the work in flight', () async {
     final slow = MockRelay(name: 'slow');
     await slow.startServer(delayResponse: const Duration(milliseconds: 300));
