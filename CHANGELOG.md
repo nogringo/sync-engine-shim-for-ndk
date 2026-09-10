@@ -1,3 +1,14 @@
+## 0.7.0
+
+- `SyncEngine.coverageOf` reads what is already synced for a request, and
+  `coverageOfFilter` reads it for one filter on every relay it was synced from.
+  Both read the local state, and neither needs the request to be registered:
+  knowing what the cache holds no longer means holding a handle and waiting for
+  a pass to land.
+- `SyncEngine.forgetFilter` forgets a filter on every relay it was synced from,
+  rather than on the relays a request happens to name. Every held request
+  carrying that filter walks it back from scratch.
+
 ## 0.6.0
 
 - Coverage is only recorded when the relay sent an EOSE. An empty answer used

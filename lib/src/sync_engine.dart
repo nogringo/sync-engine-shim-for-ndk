@@ -151,6 +151,36 @@ class SyncEngine {
   Stream<SyncRequestStatus> watchStatus(SyncHandle handle) =>
       _subjectFor(handle).stream;
 
+  /// What is already synced for [request], one entry per relay and filter pair
+  /// that has coverage. Reads the local state, it never goes to the relays, and
+  /// the request does not have to be registered.
+  Future<List<RelayFilterSyncState>> coverageOf(SyncRequest request) async {
+    final states = <RelayFilterSyncState>[];
+
+    for (final relayUrl in request.relays) {
+      for (final filter in request.filters) {
+        final state = await store.readSyncState(
+          relayUrl: relayUrl,
+          filterFingerprint: filterFingerprint(filter),
+          authPubkey: request.authPubkey,
+        );
+        if (state != null) states.add(state);
+      }
+    }
+
+    return states;
+  }
+
+  /// What is already synced for [filter], on every relay it was synced from
+  /// rather than on the relays a request happens to name.
+  Future<List<RelayFilterSyncState>> coverageOfFilter(
+    Filter filter, {
+    String? authPubkey,
+  }) => store.readSyncStates(
+    filterFingerprint: filterFingerprint(filter),
+    authPubkey: authPubkey,
+  );
+
   /// Fetches what appeared since the last pass, ignoring [maxStaleness]. This
   /// is the pull to refresh gesture. Waits for a pass already under way before
   /// starting its own, so the caller never observes a half refreshed state.
@@ -182,29 +212,68 @@ class SyncEngine {
   /// Forgets what was synced for [request], so its next pass walks it back
   /// from scratch. Coverage is per filter and relay, not per window: every
   /// window of these filters on these relays goes. Local only.
-  Future<void> forget(SyncRequest request) async {
-    final id = request.id ?? _identityOf(request);
-    final registration = _registrations[id];
-    if (registration == null) return _forget(request);
+  Future<void> forget(SyncRequest request) {
+    final registration = _registrations[request.id ?? _identityOf(request)];
 
-    await registration.running;
-    // The pass that just landed re-armed the tick.
-    registration.tick?.cancel();
-    registration.tick = null;
-
-    // A pass asked meanwhile joins the wipe instead of walking a state half gone.
-    final wipe = _forget(request);
-    registration.running = wipe;
-    try {
-      await wipe;
-    } finally {
-      registration.running = null;
-    }
-
-    unawaited(_sync(id));
+    return _forgetting([?registration], () => _deleteStatesOf(request));
   }
 
-  Future<void> _forget(SyncRequest request) async {
+  /// Forgets what was synced for [filter], on every relay it was synced from
+  /// rather than on the relays a request happens to name. Every held request
+  /// carrying that filter under [authPubkey] walks it back from scratch. Local
+  /// only.
+  Future<void> forgetFilter(Filter filter, {String? authPubkey}) {
+    final fingerprint = filterFingerprint(filter);
+
+    return _forgetting(
+      [
+        for (final registration in _registrations.values)
+          if (registration.request.authPubkey == authPubkey &&
+              registration.request.filters.any(
+                (held) => filterFingerprint(held) == fingerprint,
+              ))
+            registration,
+      ],
+      () => store.deleteSyncStates(
+        filterFingerprint: fingerprint,
+        authPubkey: authPubkey,
+      ),
+    );
+  }
+
+  /// Wipes persisted state under the requests that hold it: their pass lands
+  /// first, and they start over on what they still want once it is gone.
+  Future<void> _forgetting(
+    List<_Registration> held,
+    Future<void> Function() wipe,
+  ) async {
+    await Future.wait([for (final registration in held) ?registration.running]);
+
+    // The passes that just landed re-armed their tick.
+    for (final registration in held) {
+      registration.tick?.cancel();
+      registration.tick = null;
+    }
+
+    // A pass asked meanwhile joins the wipe instead of walking a state half gone.
+    final wiping = wipe();
+    for (final registration in held) {
+      registration.running = wiping;
+    }
+    try {
+      await wiping;
+    } finally {
+      for (final registration in held) {
+        registration.running = null;
+      }
+    }
+
+    for (final registration in held) {
+      unawaited(_sync(registration.handle.id));
+    }
+  }
+
+  Future<void> _deleteStatesOf(SyncRequest request) async {
     for (final relayUrl in request.relays) {
       for (final filter in request.filters) {
         await store.deleteSyncState(
@@ -352,7 +421,7 @@ class SyncEngine {
       phase: outcomes.contains(TaskOutcome.answered)
           ? SyncRequestPhase.synced
           : SyncRequestPhase.failed,
-      states: await _statesOf(registration.request),
+      states: await coverageOf(registration.request),
     );
   }
 
@@ -518,23 +587,6 @@ class SyncEngine {
     }
 
     return backoff > maxBackoff ? maxBackoff : backoff;
-  }
-
-  Future<List<RelayFilterSyncState>> _statesOf(SyncRequest request) async {
-    final states = <RelayFilterSyncState>[];
-
-    for (final relayUrl in request.relays) {
-      for (final filter in request.filters) {
-        final state = await store.readSyncState(
-          relayUrl: relayUrl,
-          filterFingerprint: filterFingerprint(filter),
-          authPubkey: request.authPubkey,
-        );
-        if (state != null) states.add(state);
-      }
-    }
-
-    return states;
   }
 
   void _emit(

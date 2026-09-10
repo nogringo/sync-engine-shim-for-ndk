@@ -374,6 +374,83 @@ void main() {
     },
   );
 
+  test('coverageOf reads what is synced, without registering', () async {
+    await publish(relay, 'hello');
+    engine.start();
+
+    final request = SyncRequest(filters: [notes()], relays: [relay.url]);
+    final handle = engine.ensure(request);
+    await settled(handle);
+    engine.release(handle);
+
+    final coverage = await engine.coverageOf(request);
+
+    expect(coverage.single.relayUrl, relay.url);
+    expect(coverage.single.coverage, isNotEmpty);
+  });
+
+  test('coverageOfFilter reads every relay it was synced from', () async {
+    final other = MockRelay(name: 'other');
+    await other.startServer();
+    addTearDown(other.stopServer);
+
+    engine.start();
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+    );
+    await settled(handle);
+
+    final coverage = await engine.coverageOfFilter(notes());
+
+    expect(
+      coverage.map((state) => state.relayUrl),
+      unorderedEquals([relay.url, other.url]),
+    );
+    expect(
+      await engine.coverageOfFilter(notes(), authPubkey: 'nobody'),
+      isEmpty,
+    );
+  });
+
+  test('forgetFilter drops the coverage of a released request on every '
+      'relay', () async {
+    final other = MockRelay(name: 'other');
+    await other.startServer();
+    addTearDown(other.stopServer);
+
+    engine.start();
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+    );
+    await settled(handle);
+    engine.release(handle);
+
+    await engine.forgetFilter(notes());
+
+    expect(await engine.coverageOfFilter(notes()), isEmpty);
+  });
+
+  test('forgetFilter walks a held request back from scratch', () async {
+    await publish(relay, 'hello');
+    engine.start();
+
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+    await settled(handle);
+
+    await publish(relay, 'published later');
+    await engine.forgetFilter(notes());
+    // forgetFilter restarted the pass, and the handle is syncing.
+    await settled(handle);
+
+    expect(
+      await cache.loadEvents(kinds: [1]),
+      hasLength(2),
+      reason: 'the coverage is gone, the relay is asked again',
+    );
+  });
+
   test('clearAllLocalData forgets the coverage and fetches again', () async {
     await publish(relay, 'hello');
     engine.start();

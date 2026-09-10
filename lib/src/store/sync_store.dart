@@ -34,6 +34,22 @@ class SyncStore {
     return record == null ? null : _syncStateFrom(record);
   }
 
+  /// Every state persisted for this filter, whatever the relay.
+  Future<List<RelayFilterSyncState>> readSyncStates({
+    required String filterFingerprint,
+    String? authPubkey,
+  }) async {
+    final records = await _syncStates.find(
+      db,
+      finder: Finder(
+        filter: _filterOn(filterFingerprint, authPubkey),
+        sortOrders: [SortOrder(Field.key)],
+      ),
+    );
+
+    return [for (final record in records) _syncStateFrom(record.value)];
+  }
+
   Future<void> writeSyncState(RelayFilterSyncState state) async {
     await _syncStates
         .record(
@@ -60,6 +76,17 @@ class SyncStore {
           ),
         )
         .delete(db);
+  }
+
+  /// Forgets this filter on every relay it was synced from.
+  Future<void> deleteSyncStates({
+    required String filterFingerprint,
+    String? authPubkey,
+  }) async {
+    await _syncStates.delete(
+      db,
+      finder: Finder(filter: _filterOn(filterFingerprint, authPubkey)),
+    );
   }
 
   Future<RelayKnowledge?> readRelayKnowledge(String relayUrl) async {
@@ -89,6 +116,13 @@ class SyncStore {
   }) => '$filterFingerprint|${authPubkey ?? ''}|${_relayKey(relayUrl)}';
 
   String _relayKey(String relayUrl) => cleanRelayUrl(relayUrl) ?? relayUrl;
+
+  /// A null [authPubkey] reads as `Filter.isNull`, so the anonymous states are
+  /// the ones it matches rather than all of them.
+  Filter _filterOn(String filterFingerprint, String? authPubkey) => Filter.and([
+    Filter.equals('filterFingerprint', filterFingerprint),
+    Filter.equals('authPubkey', authPubkey),
+  ]);
 
   Map<String, Object?> _syncStateTo(RelayFilterSyncState state) => {
     'relayUrl': state.relayUrl,

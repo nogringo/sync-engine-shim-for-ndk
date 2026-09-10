@@ -8,6 +8,7 @@ const fingerprint = 'a1b2c3d4e5f60718';
 const alice =
     '56e8c688aabb49e9bb68f9d8d6722c809366ad1ad959042db45970cc63152d75';
 const relay = 'wss://relay.example.com';
+const otherRelay = 'wss://other.example.com';
 
 final january = DateTime.utc(2026, 1, 1);
 final march = DateTime.utc(2026, 3, 31, 23, 59, 59);
@@ -183,6 +184,89 @@ void main() {
         relayUrl: relay,
         filterFingerprint: fingerprint,
       );
+    });
+  });
+
+  group('states of a filter', () {
+    Future<void> writeStates() async {
+      await store.writeSyncState(
+        RelayFilterSyncState(relayUrl: relay, filterFingerprint: fingerprint),
+      );
+      await store.writeSyncState(
+        RelayFilterSyncState(
+          relayUrl: otherRelay,
+          filterFingerprint: fingerprint,
+        ),
+      );
+      await store.writeSyncState(
+        RelayFilterSyncState(
+          relayUrl: relay,
+          filterFingerprint: fingerprint,
+          authPubkey: alice,
+        ),
+      );
+      await store.writeSyncState(
+        RelayFilterSyncState(
+          relayUrl: relay,
+          filterFingerprint: '0000000000000000',
+        ),
+      );
+    }
+
+    test('reads every relay of one filter, under one identity', () async {
+      await writeStates();
+
+      final read = await store.readSyncStates(filterFingerprint: fingerprint);
+
+      expect(read.map((state) => state.relayUrl), [otherRelay, relay]);
+      expect(read.every((state) => state.authPubkey == null), isTrue);
+    });
+
+    test('reads the states of an identity', () async {
+      await writeStates();
+
+      final read = await store.readSyncStates(
+        filterFingerprint: fingerprint,
+        authPubkey: alice,
+      );
+
+      expect(read, hasLength(1));
+      expect(read.single.authPubkey, alice);
+    });
+
+    test('reads nothing when the filter was never synced', () async {
+      await writeStates();
+
+      expect(
+        await store.readSyncStates(filterFingerprint: '1111111111111111'),
+        isEmpty,
+      );
+    });
+
+    test('deletes every relay of one filter, under one identity', () async {
+      await writeStates();
+
+      await store.deleteSyncStates(filterFingerprint: fingerprint);
+
+      expect(
+        await store.readSyncStates(filterFingerprint: fingerprint),
+        isEmpty,
+      );
+      expect(
+        await store.readSyncStates(
+          filterFingerprint: fingerprint,
+          authPubkey: alice,
+        ),
+        hasLength(1),
+      );
+      expect(
+        await store.readSyncStates(filterFingerprint: '0000000000000000'),
+        hasLength(1),
+      );
+    });
+
+    test('is safe when nothing was written', () async {
+      await store.deleteSyncStates(filterFingerprint: fingerprint);
     });
   });
 

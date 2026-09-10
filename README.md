@@ -73,6 +73,13 @@ It is a sign of life during a long walk, not a percentage, and its count is a
 rate rather than an inventory since the second at the boundary of two pages is
 asked twice.
 
+`coverageOf` answers what is already synced for a request, one entry per relay
+and filter pair that has coverage. It reads the local state without going to the
+relays, and the request does not have to be registered, so asking what the cache
+holds costs neither a handle nor a pass. `coverageOfFilter` asks the same of one
+filter, on every relay it was synced from rather than on the relays a request
+happens to name.
+
 `release` drops your interest in a handle. A handle survives until its last
 holder releases it, and what was synced stays in the database either way. A walk
 still running stops at its next page, and the request stops revisiting, so
@@ -86,10 +93,15 @@ after the last screen released it, as when an account is removed. Coverage is
 per filter and relay, not per window, so every window of those filters on those
 relays goes.
 
+`forgetFilter` does it for one filter on every relay it was synced from, which
+is what removing an account or a feed for good asks for: no request has to
+remember which relays served it. Every held request carrying that filter walks
+it back from scratch.
+
 `clearAllLocalData` forgets everything the engine persisted: that is what a full
 app reset calls. Held handles start over.
 
-Both are local only. The NDK cache is yours, so clear it too, and clear both or
+They are local only. The NDK cache is yours, so clear it too, and clear both or
 none: a cache emptied under a coverage that survived is never fetched again.
 
 ## How far back, and how often
