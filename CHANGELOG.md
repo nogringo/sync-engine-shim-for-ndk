@@ -1,3 +1,8 @@
+## 0.7.1
+
+- Depend on `ndk` 0.10.0-dev.6, which renamed `RelayAuth` to `AuthPolicy`.
+  0.7.0 does not compile against it.
+
 ## 0.7.0
 
 - `SyncEngine.coverageOf` reads what is already synced for a request, and

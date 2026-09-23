@@ -235,7 +235,7 @@ void main() {
     final task = taskFor(gated.url, since: at(3600), until: at(0));
     final outcome = await runner.run(
       task,
-      auth: RelayAuth.require(ndk.accounts.accounts[author.publicKey]!),
+      auth: AuthPolicy.require(ndk.accounts.accounts[author.publicKey]!),
       startedAt: startedAt,
     );
 

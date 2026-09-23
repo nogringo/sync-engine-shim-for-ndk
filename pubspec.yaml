@@ -1,6 +1,6 @@
 name: sync_engine_shim_for_ndk
 description: Downward sync engine for the ndk package. Declare what you need, the engine keeps the NDK cache in sync with the relays.
-version: 0.7.0
+version: 0.7.1
 repository: https://github.com/nogringo/sync-engine-shim-for-ndk
 
 topics:
@@ -13,7 +13,7 @@ environment:
 
 dependencies:
   crypto: ^3.0.7
-  ndk: ^0.10.0-dev.1
+  ndk: ^0.10.0-dev.6
   rxdart: ^0.28.0
   sembast: ^3.8.9+1
 

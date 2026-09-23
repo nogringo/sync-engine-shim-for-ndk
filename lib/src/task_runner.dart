@@ -64,7 +64,7 @@ class TaskRunner {
   /// logged account once a relay refuses it.
   Future<TaskOutcome> run(
     SyncTask task, {
-    RelayAuth auth = const RelayAuth.never(),
+    AuthPolicy auth = const AuthPolicy.never(),
     required DateTime startedAt,
     bool Function()? isCancelled,
     void Function(SyncProgress)? onProgress,

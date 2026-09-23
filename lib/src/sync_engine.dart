@@ -386,7 +386,7 @@ class SyncEngine {
     registration.lastError = null;
     _emit(registration, phase: SyncRequestPhase.syncing);
 
-    final RelayAuth auth;
+    final AuthPolicy auth;
     try {
       auth = _authFor(registration.request);
     } on SyncAuthUnavailable catch (error) {
@@ -429,12 +429,12 @@ class SyncEngine {
   /// at registration: a request declared before its account exists starts
   /// authenticating on its own as soon as the account shows up.
   ///
-  /// A request naming nobody gets [RelayAuth.never]. Saying nothing to ndk is
+  /// A request naming nobody gets [AuthPolicy.never]. Saying nothing to ndk is
   /// not the same: it would authenticate as the logged account on a refusal,
   /// and the anonymous state would fill with data served under an identity.
-  RelayAuth _authFor(SyncRequest request) {
+  AuthPolicy _authFor(SyncRequest request) {
     final pubkey = request.authPubkey;
-    if (pubkey == null) return const RelayAuth.never();
+    if (pubkey == null) return const AuthPolicy.never();
 
     final account = ndk.accounts.accounts[pubkey];
     if (account == null) {
@@ -454,7 +454,7 @@ class SyncEngine {
       );
     }
 
-    return RelayAuth.require(account);
+    return AuthPolicy.require(account);
   }
 
   /// Every filter of [registration] on this one relay, one after the other.
@@ -463,7 +463,7 @@ class SyncEngine {
     String relayUrl,
     Duration? staleness,
     DateTime startedAt,
-    RelayAuth auth,
+    AuthPolicy auth,
   ) async {
     final request = registration.request;
     var outcome = TaskOutcome.answered;
