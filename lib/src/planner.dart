@@ -136,6 +136,9 @@ bool _isFresh(
   if (nearestTheEnd == null) return false;
 
   final completedAt = nearestTheEnd.completedAt;
+  // Stamped by a clock since set back: it vouches for nothing until then.
+  if (completedAt.isAfter(now)) return false;
+
   final endThen = to.isBefore(completedAt) ? to : completedAt;
 
   // A range ends on a whole second where completedAt keeps its milliseconds,

@@ -160,6 +160,26 @@ void main() {
     expect(tasks.single.filter.until, seconds(now));
   });
 
+  test('revisits the recent end when the clock was set back', () {
+    final since = ago(const Duration(days: 30));
+    final ahead = now.add(const Duration(hours: 2));
+    final state = stateWith([covered(since, ahead, completedAt: ahead)]);
+
+    final tasks = plan(
+      Filter(kinds: [1], since: seconds(since)),
+      state: state,
+    );
+
+    expect(
+      tasks,
+      hasLength(1),
+      reason:
+          'coverage validated in the future would otherwise pass for fresh, '
+          'and stall the sync until the clock caught up with it',
+    );
+    expect(tasks.single.filter.until, seconds(now));
+  });
+
   test('plans a fresh trailing window when staleness is zero', () {
     final since = ago(const Duration(days: 30));
     final lastFetch = ago(const Duration(seconds: 10));

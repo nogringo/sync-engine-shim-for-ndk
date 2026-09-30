@@ -1,3 +1,8 @@
+## 0.7.2
+
+- Coverage validated by a clock since set back no longer passes for fresh. It
+  stalled every revisit until the clock caught up with it.
+
 ## 0.7.1
 
 - Depend on `ndk` 0.10.0-dev.6, which renamed `RelayAuth` to `AuthPolicy`.
