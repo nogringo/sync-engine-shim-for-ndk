@@ -307,6 +307,78 @@ void main() {
     expect(gated.connectionsAuthenticatedAs(author.publicKey), 1);
   });
 
+  test('authenticates with a signer ndk has no account for', () async {
+    final gated = MockRelay(name: 'gated', requireAuthForRequests: true);
+    await gated.startServer();
+    addTearDown(gated.stopServer);
+    await publish(gated, 'hello');
+
+    final own = SyncEngine(
+      ndk,
+      db: db,
+      signerFor: (pubkey) => pubkey == author.publicKey ? signer : null,
+    );
+    addTearDown(own.dispose);
+    own.start();
+
+    final handle = own.ensure(
+      SyncRequest(
+        filters: [notes()],
+        relays: [gated.url],
+        authPubkey: author.publicKey,
+      ),
+    );
+    final status = await own
+        .watchStatus(handle)
+        .firstWhere(
+          (status) =>
+              status.phase == SyncRequestPhase.synced ||
+              status.phase == SyncRequestPhase.failed,
+        );
+
+    expect(status.phase, SyncRequestPhase.synced);
+    expect(ndk.accounts.accounts, isEmpty);
+    expect(gated.connectionsAuthenticatedAs(author.publicKey), 1);
+    expect(await cache.loadEvents(kinds: [1]), hasLength(1));
+  });
+
+  test('reads nothing when the signer signs as another pubkey', () async {
+    final stranger = Bip340.generatePrivateKey();
+    final own = SyncEngine(
+      ndk,
+      db: db,
+      signerFor: (_) => Bip340EventSigner(
+        privateKey: stranger.privateKey,
+        publicKey: stranger.publicKey,
+      ),
+    );
+    addTearDown(own.dispose);
+
+    await publish(relay, 'hello');
+    own.start();
+
+    final handle = own.ensure(
+      SyncRequest(
+        filters: [notes()],
+        relays: [relay.url],
+        authPubkey: author.publicKey,
+      ),
+    );
+    final status = await own
+        .watchStatus(handle)
+        .firstWhere((status) => status.phase == SyncRequestPhase.failed);
+
+    expect(
+      status.lastError,
+      isA<SyncAuthUnavailable>().having(
+        (error) => error.reason,
+        'reason',
+        SyncAuthFailure.signerMismatch,
+      ),
+    );
+    expect(relay.subscriptionsRequestedOutside(author.publicKey), isEmpty);
+  });
+
   test('does not query again while coverage is fresh', () async {
     await publish(relay, 'hello');
     engine.start();

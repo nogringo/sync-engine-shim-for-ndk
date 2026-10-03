@@ -27,17 +27,25 @@ class SyncEngine {
   SyncEngine(
     this.ndk, {
     required Database db,
+    EventSigner? Function(String pubkey)? signerFor,
     this.maxStaleness = const Duration(minutes: 5),
     this.minRevisitPeriod = const Duration(seconds: 15),
     this.overlapMargin = const Duration(days: 1),
     this.initialBackoff = const Duration(seconds: 5),
     this.maxBackoff = const Duration(minutes: 5),
-  }) : store = SyncStore(db: db) {
+  }) : store = SyncStore(db: db),
+       signerFor =
+           signerFor ?? ((pubkey) => ndk.accounts.accounts[pubkey]?.signer) {
     _runner = TaskRunner(ndk: ndk, store: store);
   }
 
   final Ndk ndk;
   final SyncStore store;
+
+  /// What a request's `authPubkey` signs its NIP-42 AUTH with, asked on every
+  /// pass. Defaults to `ndk.accounts`. Returning null stops that identity from
+  /// authenticating, so a key never has to become an ndk account to sync.
+  final EventSigner? Function(String pubkey) signerFor;
 
   /// How old coverage may get before the engine goes back to the relays. It is
   /// both what [ensure] checks and how often a registered request revisits its
@@ -426,8 +434,8 @@ class SyncEngine {
   }
 
   /// The identity a request goes out under, resolved at query time rather than
-  /// at registration: a request declared before its account exists starts
-  /// authenticating on its own as soon as the account shows up.
+  /// at registration: a request declared before its signer exists starts
+  /// authenticating on its own as soon as the signer shows up.
   ///
   /// A request naming nobody gets [AuthPolicy.never]. Saying nothing to ndk is
   /// not the same: it would authenticate as the logged account on a refusal,
@@ -436,25 +444,35 @@ class SyncEngine {
     final pubkey = request.authPubkey;
     if (pubkey == null) return const AuthPolicy.never();
 
-    final account = ndk.accounts.accounts[pubkey];
-    if (account == null) {
+    final signer = signerFor(pubkey);
+    if (signer == null) {
       throw SyncAuthUnavailable(
         pubkey: pubkey,
         reason: SyncAuthFailure.unknownAccount,
       );
     }
 
+    // Coverage is filed under the pubkey the request names, not the signer's.
+    if (signer.getPublicKey() != pubkey) {
+      throw SyncAuthUnavailable(
+        pubkey: pubkey,
+        reason: SyncAuthFailure.signerMismatch,
+      );
+    }
+
     // Left to ndk this would reach no relay at all, and a task reaching no
     // relay reads as unreachable: a misconfiguration would land in the backoff
     // of a relay that did nothing wrong.
-    if (!account.signer.canSign()) {
+    if (!signer.canSign()) {
       throw SyncAuthUnavailable(
         pubkey: pubkey,
         reason: SyncAuthFailure.cannotSign,
       );
     }
 
-    return AuthPolicy.require(account);
+    return AuthPolicy.require(
+      Account(type: AccountType.externalSigner, pubkey: pubkey, signer: signer),
+    );
   }
 
   /// Every filter of [registration] on this one relay, one after the other.

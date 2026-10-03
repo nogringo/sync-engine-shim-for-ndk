@@ -1,3 +1,10 @@
+## Unreleased
+
+- `SyncEngine.signerFor` supplies the signer behind an `authPubkey`, so a key
+  no longer has to become an ndk account to sync. It defaults to `ndk.accounts`.
+- A signer that signs as another pubkey reads nothing and reports
+  `SyncAuthFailure.signerMismatch`: coverage is filed under the pubkey named.
+
 ## 0.7.2
 
 - Coverage validated by a clock since set back no longer passes for fresh. It

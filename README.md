@@ -200,16 +200,27 @@ restarting tries again straight away.
 
 ## Authenticating
 
-`SyncRequest.authPubkey` names the identity a request goes out under. It is
-looked up in `ndk.accounts` when the request runs, not when it is registered, so
-a request declared before the login is not lost: it authenticates on its next
+`SyncRequest.authPubkey` names the identity a request goes out under. Its
+signer comes from `SyncEngine.signerFor`, which defaults to `ndk.accounts`, so
+a key the app does not want as an ndk account can still sync:
+
+```dart
+final engine = SyncEngine(
+  ndk,
+  db: db,
+  signerFor: (pubkey) => mySigners[pubkey],
+);
+```
+
+The signer is looked up when the request runs, not when it is registered, so a
+request declared before the login is not lost: it authenticates on its next
 pass, within `maxStaleness`. Nothing watches for the login, so `refresh` is what
 turns that wait into nothing. Coverage stays filed under that pubkey, separate
 from the anonymous one, since a relay may well serve two different things.
 
 A request that names nobody never sends an AUTH, whoever happens to be logged
-in. A request that names a pubkey ndk cannot sign with reads nothing at all: it
-reports a `SyncAuthUnavailable` on `SyncRequestStatus.lastError` and leaves the
+in. A request whose pubkey has no signer able to sign as it reads nothing at
+all: it reports a `SyncAuthUnavailable` on `SyncRequestStatus.lastError` and leaves the
 relay alone, rather than reading anonymously and filing the answers under an
 identity that never signed for them.
 
