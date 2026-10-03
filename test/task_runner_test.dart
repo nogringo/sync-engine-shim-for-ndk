@@ -4,6 +4,7 @@ import 'package:sembast/sembast_memory.dart' hide Filter;
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
 import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
 import 'package:sync_engine_shim_for_ndk/src/planner.dart';
+import 'package:sync_engine_shim_for_ndk/src/store/sembast_sync_store.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
 import 'package:sync_engine_shim_for_ndk/src/task_runner.dart';
 import 'package:test/test.dart';
@@ -51,7 +52,7 @@ void main() {
     );
 
     final db = await newDatabaseFactoryMemory().openDatabase('sync_engine.db');
-    store = SyncStore(db: db);
+    store = SembastSyncStore(db);
     runner = TaskRunner(ndk: ndk, store: store, pageLimit: 2);
   });
 

@@ -4,6 +4,10 @@
   no longer has to become an ndk account to sync. It defaults to `ndk.accounts`.
 - A signer that signs as another pubkey reads nothing and reports
   `SyncAuthFailure.signerMismatch`: coverage is filed under the pubkey named.
+- `SyncEngine` takes a `SyncStore` instead of a sembast `Database`, so coverage
+  can live in any database. `SembastSyncStore(db)` reads what 0.7.2 wrote.
+- A relay named under two spellings is walked once, under its normalised url.
+- `RelayKnowledge` is removed: the engine never read nor wrote it.
 
 ## 0.7.2
 

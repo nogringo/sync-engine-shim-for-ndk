@@ -1,6 +1,6 @@
 import 'package:sembast/sembast_memory.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
-import 'package:sync_engine_shim_for_ndk/src/entities/relay_knowledge.dart';
+import 'package:sync_engine_shim_for_ndk/src/store/sembast_sync_store.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
 import 'package:test/test.dart';
 
@@ -20,7 +20,7 @@ void main() {
   setUp(() async {
     // A fresh factory per test, otherwise memory databases are shared by name.
     final db = await newDatabaseFactoryMemory().openDatabase('sync_engine.db');
-    store = SyncStore(db: db);
+    store = SembastSyncStore(db);
   });
 
   group('sync state', () {
@@ -74,19 +74,6 @@ void main() {
       );
 
       expect(read, isNull);
-    });
-
-    test('reads back through another spelling of the relay url', () async {
-      await store.writeSyncState(
-        RelayFilterSyncState(relayUrl: relay, filterFingerprint: fingerprint),
-      );
-
-      final read = await store.readSyncState(
-        relayUrl: 'wss://Relay.Example.com:443/',
-        filterFingerprint: fingerprint,
-      );
-
-      expect(read, isNotNull);
     });
 
     test('keeps authenticated and anonymous states apart', () async {
@@ -270,41 +257,8 @@ void main() {
     });
   });
 
-  group('relay knowledge', () {
-    test('round trips', () async {
-      await store.writeRelayKnowledge(
-        RelayKnowledge(
-          relayUrl: relay,
-          lastConnectedAt: april,
-          lastFailureAt: january,
-        ),
-      );
-
-      final read = await store.readRelayKnowledge(relay);
-
-      expect(read!.relayUrl, relay);
-      expect(read.lastConnectedAt, april);
-      expect(read.lastFailureAt, january);
-    });
-
-    test('reads back through another spelling of the relay url', () async {
-      await store.writeRelayKnowledge(
-        RelayKnowledge(relayUrl: '$relay/', lastConnectedAt: april),
-      );
-
-      final read = await store.readRelayKnowledge(relay);
-
-      expect(read!.lastFailureAt, isNull);
-      expect(read.lastConnectedAt, april);
-    });
-
-    test('returns null when nothing was written', () async {
-      expect(await store.readRelayKnowledge(relay), isNull);
-    });
-  });
-
   group('clear', () {
-    test('forgets both stores', () async {
+    test('forgets every state', () async {
       await store.writeSyncState(
         RelayFilterSyncState(
           relayUrl: relay,
@@ -315,8 +269,11 @@ void main() {
           ],
         ),
       );
-      await store.writeRelayKnowledge(
-        RelayKnowledge(relayUrl: relay, lastConnectedAt: april),
+      await store.writeSyncState(
+        RelayFilterSyncState(
+          relayUrl: otherRelay,
+          filterFingerprint: fingerprint,
+        ),
       );
 
       await store.clear();
@@ -329,14 +286,20 @@ void main() {
         ),
         isNull,
       );
-      expect(await store.readRelayKnowledge(relay), isNull);
+      expect(
+        await store.readSyncStates(filterFingerprint: fingerprint),
+        isEmpty,
+      );
     });
 
     test('is safe on an empty store', () async {
       await store.clear();
       await store.clear();
 
-      expect(await store.readRelayKnowledge(relay), isNull);
+      expect(
+        await store.readSyncStates(filterFingerprint: fingerprint),
+        isEmpty,
+      );
     });
   });
 }

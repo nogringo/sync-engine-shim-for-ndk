@@ -24,7 +24,7 @@ Future<void> main() async {
     NdkConfig(eventVerifier: Bip340EventVerifier(), cache: cache),
   );
 
-  final engine = SyncEngine(ndk, db: db);
+  final engine = SyncEngine(ndk, store: SembastSyncStore(db));
   engine.start();
 
   final handle = engine.ensure(
@@ -51,6 +51,12 @@ final notes = await cache.loadEvents(kinds: [1], pubKeys: [myPubkey]);
 
 The engine returns handles and statuses, never events. It has one job: making
 sure the cache holds what you asked for.
+
+## Where the coverage lives
+
+What was synced persists through a `SyncStore`, so a restart does not fetch it
+again. `SembastSyncStore` ships with the package. To keep it in another
+database, implement `SyncStore`: its doc says what the engine expects back.
 
 ## ensure, refresh, release
 
@@ -134,7 +140,7 @@ Two durations drive the rest, given to the engine and overridable per request:
 ```dart
 SyncEngine(
   ndk,
-  db: db,
+  store: store,
   maxStaleness: const Duration(minutes: 5), // how often the recent end is revisited
   overlapMargin: const Duration(days: 1),   // how far back a window reaches beyond
 );                                          // what is strictly missing
@@ -153,7 +159,7 @@ those.
 A third duration is the floor under all this:
 
 ```dart
-SyncEngine(ndk, db: db, minRevisitPeriod: const Duration(seconds: 15));
+SyncEngine(ndk, store: store, minRevisitPeriod: const Duration(seconds: 15));
 ```
 
 Asking to be fresher than that is asking for a subscription, which this package
@@ -207,7 +213,7 @@ a key the app does not want as an ndk account can still sync:
 ```dart
 final engine = SyncEngine(
   ndk,
-  db: db,
+  store: store,
   signerFor: (pubkey) => mySigners[pubkey],
 );
 ```

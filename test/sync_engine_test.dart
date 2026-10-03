@@ -38,7 +38,7 @@ void main() {
     db = await newDatabaseFactoryMemory().openDatabase('sync_engine.db');
     engine = SyncEngine(
       ndk,
-      db: db,
+      store: SembastSyncStore(db),
       minRevisitPeriod: const Duration(milliseconds: 50),
       initialBackoff: const Duration(milliseconds: 200),
       maxBackoff: const Duration(seconds: 1),
@@ -315,7 +315,7 @@ void main() {
 
     final own = SyncEngine(
       ndk,
-      db: db,
+      store: SembastSyncStore(db),
       signerFor: (pubkey) => pubkey == author.publicKey ? signer : null,
     );
     addTearDown(own.dispose);
@@ -346,7 +346,7 @@ void main() {
     final stranger = Bip340.generatePrivateKey();
     final own = SyncEngine(
       ndk,
-      db: db,
+      store: SembastSyncStore(db),
       signerFor: (_) => Bip340EventSigner(
         privateKey: stranger.privateKey,
         publicKey: stranger.publicKey,
@@ -459,6 +459,20 @@ void main() {
 
     expect(coverage.single.relayUrl, relay.url);
     expect(coverage.single.coverage, isNotEmpty);
+  });
+
+  test('coverageOf reads through another spelling of the relay url', () async {
+    engine.start();
+    final handle = engine.ensure(
+      SyncRequest(filters: [notes()], relays: [relay.url]),
+    );
+    await settled(handle);
+
+    final coverage = await engine.coverageOf(
+      SyncRequest(filters: [notes()], relays: ['${relay.url}/']),
+    );
+
+    expect(coverage.single.relayUrl, relay.url);
   });
 
   test('coverageOfFilter reads every relay it was synced from', () async {
@@ -636,7 +650,7 @@ void main() {
   test('never revisits faster than the engine can poll', () async {
     final slowFloor = SyncEngine(
       ndk,
-      db: db,
+      store: SembastSyncStore(db),
       minRevisitPeriod: const Duration(seconds: 30),
     );
     addTearDown(slowFloor.dispose);
@@ -852,7 +866,7 @@ void main() {
     // start a pass of its own, and nobody would be there to await that one.
     final own = SyncEngine(
       ndk,
-      db: ownDb,
+      store: SembastSyncStore(ownDb),
       initialBackoff: const Duration(minutes: 5),
     );
     addTearDown(own.dispose);

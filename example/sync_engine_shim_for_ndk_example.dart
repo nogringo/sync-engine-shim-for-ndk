@@ -13,7 +13,7 @@ Future<void> main() async {
     NdkConfig(eventVerifier: Bip340EventVerifier(), cache: cache),
   );
 
-  final engine = SyncEngine(ndk, db: db);
+  final engine = SyncEngine(ndk, store: SembastSyncStore(db));
   engine.start();
 
   final filter = Filter(kinds: [1], authors: [somePubkey]);

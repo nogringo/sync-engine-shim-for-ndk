@@ -4,7 +4,6 @@ import 'dart:collection';
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/helpers/relay_helper.dart';
 import 'package:rxdart/rxdart.dart';
-import 'package:sembast/sembast.dart' hide Filter;
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_auth_error.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_engine_status.dart';
@@ -26,15 +25,14 @@ import 'package:sync_engine_shim_for_ndk/src/task_runner.dart';
 class SyncEngine {
   SyncEngine(
     this.ndk, {
-    required Database db,
+    required this.store,
     EventSigner? Function(String pubkey)? signerFor,
     this.maxStaleness = const Duration(minutes: 5),
     this.minRevisitPeriod = const Duration(seconds: 15),
     this.overlapMargin = const Duration(days: 1),
     this.initialBackoff = const Duration(seconds: 5),
     this.maxBackoff = const Duration(minutes: 5),
-  }) : store = SyncStore(db: db),
-       signerFor =
+  }) : signerFor =
            signerFor ?? ((pubkey) => ndk.accounts.accounts[pubkey]?.signer) {
     _runner = TaskRunner(ndk: ndk, store: store);
   }
@@ -165,7 +163,7 @@ class SyncEngine {
   Future<List<RelayFilterSyncState>> coverageOf(SyncRequest request) async {
     final states = <RelayFilterSyncState>[];
 
-    for (final relayUrl in request.relays) {
+    for (final relayUrl in _relayKeysOf(request)) {
       for (final filter in request.filters) {
         final state = await store.readSyncState(
           relayUrl: relayUrl,
@@ -282,7 +280,7 @@ class SyncEngine {
   }
 
   Future<void> _deleteStatesOf(SyncRequest request) async {
-    for (final relayUrl in request.relays) {
+    for (final relayUrl in _relayKeysOf(request)) {
       for (final filter in request.filters) {
         await store.deleteSyncState(
           relayUrl: relayUrl,
@@ -409,7 +407,7 @@ class SyncEngine {
     // Waiting on every relay of the request only gates this status update.
     // Each relay keeps draining its own queue meanwhile.
     final outcomes = await Future.wait([
-      for (final relayUrl in registration.request.relays)
+      for (final relayUrl in _relayKeysOf(registration.request))
         _enqueue(
           relayUrl,
           () => _syncRelay(registration, relayUrl, staleness, startedAt, auth),
