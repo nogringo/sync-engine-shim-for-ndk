@@ -1,4 +1,4 @@
-## Unreleased
+## 0.8.0
 
 - `SyncEngine.signerFor` supplies the signer behind an `authPubkey`, so a key
   no longer has to become an ndk account to sync. It defaults to `ndk.accounts`.
