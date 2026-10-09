@@ -1,3 +1,7 @@
+## 0.8.1
+
+- Accept `ndk` 0.11.0-dev.0 alongside 0.10. Nothing changed in the code.
+
 ## 0.8.0
 
 - `SyncEngine.signerFor` supplies the signer behind an `authPubkey`, so a key
