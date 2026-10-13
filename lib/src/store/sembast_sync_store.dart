@@ -1,15 +1,20 @@
 import 'package:sembast/sembast.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
+import 'package:url_set_for_ndk/url_set_for_ndk.dart';
 
 /// [SyncStore] on a sembast database. Timestamps are stored as epoch
 /// milliseconds.
 class SembastSyncStore implements SyncStore {
-  SembastSyncStore(this.db);
+  SembastSyncStore(this.db) : urlListChecks = _SembastUrlListChecks(db);
 
   static const syncStateStoreName = 'relay_filter_sync_states';
+  static const urlListCheckStoreName = 'url_list_checks';
 
   final Database db;
+
+  @override
+  final UrlListCheckStore urlListChecks;
 
   final _syncStates = stringMapStoreFactory.store(syncStateStoreName);
 
@@ -90,7 +95,10 @@ class SembastSyncStore implements SyncStore {
   }
 
   @override
-  Future<void> clear() => _syncStates.drop(db);
+  Future<void> clear() async {
+    await _syncStates.drop(db);
+    await _urlListCheckStore.drop(db);
+  }
 
   /// Fixed width fields first, and `|` as separator: a relay url carries its
   /// own colons, in `wss://` and in a non default port.
@@ -143,4 +151,26 @@ class SembastSyncStore implements SyncStore {
   DateTime? _dateFrom(Object? value) => value == null
       ? null
       : DateTime.fromMillisecondsSinceEpoch(value as int, isUtc: true);
+}
+
+final _urlListCheckStore = stringMapStoreFactory.store(
+  SembastSyncStore.urlListCheckStoreName,
+);
+
+class _SembastUrlListChecks implements UrlListCheckStore {
+  _SembastUrlListChecks(this.db);
+
+  final Database db;
+
+  @override
+  Future<UrlListCheck?> read(String pubkey, int kind) async {
+    final record = await _urlListCheckStore.record('$kind|$pubkey').get(db);
+
+    return record == null ? null : UrlListCheck.fromMap(record);
+  }
+
+  @override
+  Future<void> write(UrlListCheck check) => _urlListCheckStore
+      .record('${check.kind}|${check.pubkey}')
+      .put(db, check.toMap());
 }

@@ -3,6 +3,7 @@ import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.da
 import 'package:sync_engine_shim_for_ndk/src/store/sembast_sync_store.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
 import 'package:test/test.dart';
+import 'package:url_set_for_ndk/url_set_for_ndk.dart';
 
 const fingerprint = 'a1b2c3d4e5f60718';
 const alice =
@@ -257,6 +258,28 @@ void main() {
     });
   });
 
+  group('list checks', () {
+    test('round trip, one per pubkey and kind', () async {
+      await store.urlListChecks.write(
+        UrlListCheck(pubkey: alice, kind: 10002, checkedAt: march, found: true),
+      );
+      await store.urlListChecks.write(
+        UrlListCheck(
+          pubkey: alice,
+          kind: 10002,
+          checkedAt: april,
+          found: false,
+        ),
+      );
+
+      final read = await store.urlListChecks.read(alice, 10002);
+      expect(read!.checkedAt, april);
+      expect(read.checkedAt.isUtc, isTrue);
+      expect(read.found, isFalse);
+      expect(await store.urlListChecks.read(alice, 10050), isNull);
+    });
+  });
+
   group('clear', () {
     test('forgets every state', () async {
       await store.writeSyncState(
@@ -290,6 +313,16 @@ void main() {
         await store.readSyncStates(filterFingerprint: fingerprint),
         isEmpty,
       );
+    });
+
+    test('forgets every list check', () async {
+      await store.urlListChecks.write(
+        UrlListCheck(pubkey: alice, kind: 10002, checkedAt: april, found: true),
+      );
+
+      await store.clear();
+
+      expect(await store.urlListChecks.read(alice, 10002), isNull);
     });
 
     test('is safe on an empty store', () async {

@@ -1,4 +1,5 @@
 import 'package:sync_engine_shim_for_ndk/src/entities/relay_filter_sync_state.dart';
+import 'package:url_set_for_ndk/url_set_for_ndk.dart';
 
 /// Persists what has already been synced, so a restart does not refetch it.
 /// Relay urls arrive normalised, dates must read back in UTC, and a null
@@ -30,6 +31,9 @@ abstract interface class SyncStore {
     String? authPubkey,
   });
 
-  /// Drops everything this store persisted. Local only.
+  /// When each relay list a request reads was last fetched.
+  UrlListCheckStore get urlListChecks;
+
+  /// Drops everything this store persisted, list checks included. Local only.
   Future<void> clear();
 }

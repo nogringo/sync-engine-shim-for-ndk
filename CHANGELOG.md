@@ -1,3 +1,19 @@
+## 0.9.0
+
+- `SyncRequest.relays` is a `UrlSet` from `url_set_for_ndk`, which this package
+  re-exports. Wrap a fixed list in `UrlSet.explicit`. A set reading lists, like
+  `UrlSet.dm(me)` or `UrlSet.outbox(pubkey)`, is resolved again on every pass,
+  so a request follows the account when it changes its relays.
+- A list is read from the NDK cache for `SyncEngine.relayListMaxAge`, an hour by
+  default, and fetched again past that from `SyncEngine.discoveryRelays` and its
+  owner's write relays.
+- A list never fetched, while no relay answers, fails the pass with
+  `SyncRelaysUnavailable`. The request keeps ticking until it comes through.
+- `SyncStore` has an `urlListChecks` store, where the dates of those fetches
+  live. `SembastSyncStore` keeps them in the same database, and `clear` drops
+  them too.
+- `ensure` refuses a set reading Blossom servers.
+
 ## 0.8.1
 
 - Accept `ndk` 0.11.0-dev.0 alongside 0.10. Nothing changed in the code.

@@ -30,7 +30,7 @@ Future<void> main() async {
   final handle = engine.ensure(
     SyncRequest(
       filters: [Filter(kinds: [1], authors: [myPubkey])],
-      relays: const ['wss://relay.damus.io', 'wss://nos.lol'],
+      relays: const UrlSet.explicit(['wss://relay.damus.io', 'wss://nos.lol']),
     ),
   );
 
@@ -130,7 +130,7 @@ engine.ensure(
       Filter(kinds: [1], since: at(DateTime.utc(2023)), until: at(DateTime.utc(2024))),
       Filter(kinds: [1], since: at(DateTime.utc(2025)), until: at(DateTime.utc(2026))),
     ],
-    relays: const ['wss://relay.damus.io'],
+    relays: const UrlSet.explicit(['wss://relay.damus.io']),
   ),
 );
 ```
@@ -203,6 +203,44 @@ that doubles from `initialBackoff` up to `maxBackoff` and resets the moment that
 relay answers. Your app has nothing to call back: a request that failed while
 the train was in a tunnel recovers by itself. The backoff lives in memory, so
 restarting tries again straight away.
+
+## Relays read from lists
+
+`SyncRequest.relays` is a `UrlSet` from
+[`url_set_for_ndk`](https://pub.dev/packages/url_set_for_ndk), re-exported by
+this package. `UrlSet.explicit` names relays outright. The other sets read the
+lists accounts publish:
+
+```dart
+engine.ensure(
+  SyncRequest(
+    filters: [Filter(kinds: [1059], pTags: [me])],
+    relays: UrlSet.fallback([
+      UrlSet.dm(me),
+      UrlSet.explicit(['wss://relay.damus.io']),
+    ]),
+  ),
+);
+```
+
+Every pass resolves the set again, so a request follows its lists: when the
+account moves its DM relays, the next pass walks the new ones. Coverage is per
+relay, so a relay that stays keeps what it covered, and a new one starts from
+scratch.
+
+A list is fetched from `discoveryRelays` and its owner's write relays, then read
+from the NDK cache for `relayListMaxAge`, an hour by default. Past that the
+engine asks again, and if nobody answers it keeps the list it knows. The dates
+live in the `SyncStore`, so a restart does not fetch the lists again either.
+
+A list never fetched, while no relay answers, fails the pass with
+`SyncRelaysUnavailable` as `lastError`. The request keeps ticking, and resumes
+once the list comes through.
+
+`coverageOf` and `forget` stay local: they resolve the set from the NDK cache
+alone. A list never fetched names no relay there, and nothing was synced from it.
+
+Blossom servers are not relays, and `ensure` refuses a set reading them.
 
 ## Authenticating
 

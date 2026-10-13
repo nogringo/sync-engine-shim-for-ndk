@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:ndk/entities.dart' show Nip65;
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/nips/nip01/bip340.dart';
 import 'package:sembast/sembast_memory.dart' hide Filter;
@@ -42,6 +45,7 @@ void main() {
       minRevisitPeriod: const Duration(milliseconds: 50),
       initialBackoff: const Duration(milliseconds: 200),
       maxBackoff: const Duration(seconds: 1),
+      discoveryRelays: [relay.url],
     );
   });
 
@@ -67,6 +71,22 @@ void main() {
         .broadcastDoneFuture;
   }
 
+  Future<void> publishList(int kind, List<List<String>> tags) async {
+    await ndk.broadcast
+        .broadcast(
+          nostrEvent: Nip01Event(
+            pubKey: author.publicKey,
+            kind: kind,
+            tags: tags,
+            content: '',
+          ),
+          specificRelays: [relay.url],
+          customSigner: signer,
+          saveToCache: false,
+        )
+        .broadcastDoneFuture;
+  }
+
   Future<SyncRequestStatus> settled(SyncHandle handle) => engine
       .watchStatus(handle)
       .firstWhere(
@@ -80,7 +100,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     final status = await settled(handle);
 
@@ -105,7 +125,7 @@ void main() {
               ..until = seconds(now.subtract(const Duration(days: 20))),
             notes()..since = seconds(now.subtract(const Duration(days: 30))),
           ],
-          relays: [relay.url],
+          relays: UrlSet.explicit([relay.url]),
         ),
       );
       await settled(handle);
@@ -124,7 +144,7 @@ void main() {
     await publish(relay, 'hello');
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
 
     expect(engine.status(handle).phase, SyncRequestPhase.idle);
@@ -138,10 +158,15 @@ void main() {
   });
 
   test('gives the same handle to the same request', () {
-    final request = SyncRequest(filters: [notes()], relays: [relay.url]);
+    final request = SyncRequest(
+      filters: [notes()],
+      relays: UrlSet.explicit([relay.url]),
+    );
     final other = SyncRequest(
       filters: [notes()],
-      relays: [relay.url.toUpperCase().replaceFirst('WS://', 'ws://')],
+      relays: UrlSet.explicit([
+        relay.url.toUpperCase().replaceFirst('WS://', 'ws://'),
+      ]),
     );
 
     expect(engine.ensure(request), engine.ensure(other));
@@ -155,7 +180,7 @@ void main() {
           ..since = since
           ..until = until,
       ],
-      relays: [relay.url],
+      relays: UrlSet.explicit([relay.url]),
     );
 
     expect(
@@ -166,7 +191,10 @@ void main() {
   });
 
   test('keeps the handle alive until every holder released it', () async {
-    final request = SyncRequest(filters: [notes()], relays: [relay.url]);
+    final request = SyncRequest(
+      filters: [notes()],
+      relays: UrlSet.explicit([relay.url]),
+    );
     final handle = engine.ensure(request);
     engine.ensure(request);
 
@@ -183,7 +211,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
 
     expect((await settled(handle)).phase, SyncRequestPhase.failed);
@@ -204,7 +232,7 @@ void main() {
     final handle = engine.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [gated.url],
+        relays: UrlSet.explicit([gated.url]),
         authPubkey: author.publicKey,
       ),
     );
@@ -221,7 +249,7 @@ void main() {
     final handle = engine.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         authPubkey: author.publicKey,
       ),
     );
@@ -255,7 +283,7 @@ void main() {
     final handle = engine.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         authPubkey: author.publicKey,
       ),
     );
@@ -283,7 +311,7 @@ void main() {
     final handle = engine.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [gated.url],
+        relays: UrlSet.explicit([gated.url]),
         authPubkey: author.publicKey,
         maxStaleness: Duration.zero,
       ),
@@ -324,7 +352,7 @@ void main() {
     final handle = own.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [gated.url],
+        relays: UrlSet.explicit([gated.url]),
         authPubkey: author.publicKey,
       ),
     );
@@ -360,7 +388,7 @@ void main() {
     final handle = own.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         authPubkey: author.publicKey,
       ),
     );
@@ -384,12 +412,14 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     await settled(handle);
 
     await publish(relay, 'published later');
-    engine.ensure(SyncRequest(filters: [notes()], relays: [relay.url]));
+    engine.ensure(
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
+    );
     // stop() waits for the pass this second ensure may have started.
     await engine.stop();
 
@@ -404,7 +434,10 @@ void main() {
     await publish(relay, 'hello');
     engine.start();
 
-    final request = SyncRequest(filters: [notes()], relays: [relay.url]);
+    final request = SyncRequest(
+      filters: [notes()],
+      relays: UrlSet.explicit([relay.url]),
+    );
     final handle = engine.ensure(request);
     await settled(handle);
 
@@ -429,12 +462,17 @@ void main() {
 
       engine.start();
       final handle = engine.ensure(
-        SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+        SyncRequest(
+          filters: [notes()],
+          relays: UrlSet.explicit([relay.url, other.url]),
+        ),
       );
       await settled(handle);
       engine.release(handle);
 
-      await engine.forget(SyncRequest(filters: [notes()], relays: [relay.url]));
+      await engine.forget(
+        SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
+      );
 
       Future<RelayFilterSyncState?> stateOn(String relayUrl) =>
           engine.store.readSyncState(
@@ -450,7 +488,10 @@ void main() {
     await publish(relay, 'hello');
     engine.start();
 
-    final request = SyncRequest(filters: [notes()], relays: [relay.url]);
+    final request = SyncRequest(
+      filters: [notes()],
+      relays: UrlSet.explicit([relay.url]),
+    );
     final handle = engine.ensure(request);
     await settled(handle);
     engine.release(handle);
@@ -464,12 +505,15 @@ void main() {
   test('coverageOf reads through another spelling of the relay url', () async {
     engine.start();
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     await settled(handle);
 
     final coverage = await engine.coverageOf(
-      SyncRequest(filters: [notes()], relays: ['${relay.url}/']),
+      SyncRequest(
+        filters: [notes()],
+        relays: UrlSet.explicit(['${relay.url}/']),
+      ),
     );
 
     expect(coverage.single.relayUrl, relay.url);
@@ -482,7 +526,10 @@ void main() {
 
     engine.start();
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+      SyncRequest(
+        filters: [notes()],
+        relays: UrlSet.explicit([relay.url, other.url]),
+      ),
     );
     await settled(handle);
 
@@ -506,7 +553,10 @@ void main() {
 
     engine.start();
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+      SyncRequest(
+        filters: [notes()],
+        relays: UrlSet.explicit([relay.url, other.url]),
+      ),
     );
     await settled(handle);
     engine.release(handle);
@@ -521,7 +571,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     await settled(handle);
 
@@ -542,7 +592,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     await settled(handle);
 
@@ -581,7 +631,9 @@ void main() {
     addTearDown(slow.stopServer);
 
     engine.start();
-    engine.ensure(SyncRequest(filters: [notes()], relays: [slow.url]));
+    engine.ensure(
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([slow.url])),
+    );
 
     while (slow.connectedClientCount == 0) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -604,7 +656,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     await settled(handle);
     await publish(relay, 'published later');
@@ -633,7 +685,7 @@ void main() {
     final handle = engine.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         maxStaleness: const Duration(milliseconds: 200),
       ),
     );
@@ -661,7 +713,7 @@ void main() {
     final handle = slowFloor.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         maxStaleness: Duration.zero,
       ),
     );
@@ -692,7 +744,7 @@ void main() {
     final handle = engine.ensure(
       SyncRequest(
         filters: [notes()],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         maxStaleness: const Duration(milliseconds: 200),
       ),
     );
@@ -720,7 +772,7 @@ void main() {
             ..since = seconds(now.subtract(const Duration(hours: 4)))
             ..until = seconds(now.subtract(const Duration(hours: 2))),
         ],
-        relays: [relay.url],
+        relays: UrlSet.explicit([relay.url]),
         maxStaleness: const Duration(milliseconds: 200),
       ),
     );
@@ -753,7 +805,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
 
     final seen = <SyncProgress>[];
@@ -779,7 +831,10 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url, other.url]),
+      SyncRequest(
+        filters: [notes()],
+        relays: UrlSet.explicit([relay.url, other.url]),
+      ),
     );
     await settled(handle);
 
@@ -799,7 +854,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     expect((await settled(handle)).phase, SyncRequestPhase.failed);
 
@@ -823,7 +878,7 @@ void main() {
     engine.start();
 
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     expect((await settled(handle)).phase, SyncRequestPhase.failed);
 
@@ -847,7 +902,7 @@ void main() {
 
     engine.start();
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [slow.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([slow.url])),
     );
 
     await engine.stop();
@@ -873,7 +928,7 @@ void main() {
 
     own.start();
     final handle = own.ensure(
-      SyncRequest(filters: [notes()], relays: [relay.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([relay.url])),
     );
     await own
         .watchStatus(handle)
@@ -894,7 +949,7 @@ void main() {
 
     engine.start();
     final handle = engine.ensure(
-      SyncRequest(filters: [notes()], relays: [slow.url]),
+      SyncRequest(filters: [notes()], relays: UrlSet.explicit([slow.url])),
     );
 
     while (slow.connectedClientCount == 0) {
@@ -920,10 +975,18 @@ void main() {
     engine.start();
 
     final slowHandle = engine.ensure(
-      SyncRequest(id: 'slow', filters: [notes()], relays: [slow.url]),
+      SyncRequest(
+        id: 'slow',
+        filters: [notes()],
+        relays: UrlSet.explicit([slow.url]),
+      ),
     );
     final fastHandle = engine.ensure(
-      SyncRequest(id: 'fast', filters: [notes()], relays: [relay.url]),
+      SyncRequest(
+        id: 'fast',
+        filters: [notes()],
+        relays: UrlSet.explicit([relay.url]),
+      ),
     );
 
     await settled(fastHandle);
@@ -935,5 +998,127 @@ void main() {
     );
 
     await settled(slowHandle);
+  });
+
+  group('relays read from lists', () {
+    test('syncs from the relays a list names', () async {
+      final other = MockRelay(name: 'outbox');
+      await other.startServer();
+      addTearDown(other.stopServer);
+      await publishList(Nip65.kKind, [
+        ['r', other.url, 'write'],
+      ]);
+      await publish(other, 'hello');
+      engine.start();
+
+      final request = SyncRequest(
+        filters: [notes()],
+        relays: UrlSet.outbox(author.publicKey),
+      );
+      final status = await settled(engine.ensure(request));
+
+      expect(status.phase, SyncRequestPhase.synced);
+      expect(await cache.loadEvents(kinds: [1]), hasLength(1));
+      expect(
+        [for (final state in await engine.coverageOf(request)) state.relayUrl],
+        [other.url],
+      );
+    });
+
+    test('a list that cannot be read fails the pass, which retries', () async {
+      final content = await signer.encryptNip44(
+        plaintext: jsonEncode([
+          ['relay', relay.url],
+        ]),
+        recipientPubKey: author.publicKey,
+      );
+      await cache.saveEvent(
+        await signer.sign(
+          Nip01Event(
+            pubKey: author.publicKey,
+            kind: 10013,
+            tags: const [],
+            content: content!,
+          ),
+        ),
+      );
+      await publish(relay, 'hello');
+      engine.start();
+
+      final handle = engine.ensure(
+        SyncRequest(
+          filters: [notes()],
+          relays: UrlSet.private(author.publicKey),
+          maxStaleness: const Duration(milliseconds: 50),
+        ),
+      );
+      final failed = await settled(handle);
+      expect(failed.phase, SyncRequestPhase.failed);
+      expect(failed.lastError, isA<SyncRelaysUnavailable>());
+
+      ndk.accounts.loginPrivateKey(
+        pubkey: author.publicKey,
+        privkey: author.privateKey!,
+      );
+      await engine
+          .watchStatus(handle)
+          .firstWhere((status) => status.phase == SyncRequestPhase.synced);
+      expect(await cache.loadEvents(kinds: [1]), hasLength(1));
+    });
+
+    test('a list read once is not asked for again while fresh', () async {
+      await publishList(Nip65.kKind, [
+        ['r', relay.url, 'write'],
+      ]);
+      engine.start();
+
+      final handle = engine.ensure(
+        SyncRequest(
+          filters: [notes()],
+          relays: UrlSet.outbox(author.publicKey),
+        ),
+      );
+      await settled(handle);
+      final asked = relay.receivedRequests(kind: Nip65.kKind);
+      await engine.refresh(handle);
+
+      expect(asked, 1);
+      expect(relay.receivedRequests(kind: Nip65.kKind), asked);
+    });
+
+    test('refuses Blossom servers', () {
+      expect(
+        () => engine.ensure(
+          SyncRequest(
+            filters: [notes()],
+            relays: UrlSet.blossom(author.publicKey),
+          ),
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('a union in another order shares the handle', () {
+      final first = engine.ensure(
+        SyncRequest(
+          filters: [notes()],
+          relays: UrlSet.union([
+            UrlSet.explicit([relay.url]),
+            UrlSet.dm(author.publicKey),
+          ]),
+        ),
+      );
+      final second = engine.ensure(
+        SyncRequest(
+          filters: [notes()],
+          relays: UrlSet.union([
+            UrlSet.dm(author.publicKey),
+            UrlSet.explicit(['${relay.url}/']),
+          ]),
+        ),
+      );
+
+      expect(second, first);
+    });
   });
 }

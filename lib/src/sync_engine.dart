@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:ndk/ndk.dart';
 import 'package:ndk/shared/helpers/relay_helper.dart';
@@ -9,12 +10,14 @@ import 'package:sync_engine_shim_for_ndk/src/entities/sync_auth_error.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_engine_status.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_handle.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_progress.dart';
+import 'package:sync_engine_shim_for_ndk/src/entities/sync_relays_unavailable.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_request.dart';
 import 'package:sync_engine_shim_for_ndk/src/entities/sync_request_status.dart';
 import 'package:sync_engine_shim_for_ndk/src/filter_fingerprint.dart';
 import 'package:sync_engine_shim_for_ndk/src/planner.dart';
 import 'package:sync_engine_shim_for_ndk/src/store/sync_store.dart';
 import 'package:sync_engine_shim_for_ndk/src/task_runner.dart';
+import 'package:url_set_for_ndk/url_set_for_ndk.dart';
 
 /// Downward sync only: the engine fills the NDK cache, it never broadcasts.
 /// Callers read events from the NDK cache, not from this API.
@@ -32,9 +35,22 @@ class SyncEngine {
     this.overlapMargin = const Duration(days: 1),
     this.initialBackoff = const Duration(seconds: 5),
     this.maxBackoff = const Duration(minutes: 5),
+    this.discoveryRelays = defaultIndexerRelays,
+    this.relayListMaxAge = const Duration(hours: 1),
   }) : signerFor =
            signerFor ?? ((pubkey) => ndk.accounts.accounts[pubkey]?.signer) {
     _runner = TaskRunner(ndk: ndk, store: store);
+    _lookup = ndkUrlListFn(
+      ndk,
+      discoveryRelays: discoveryRelays,
+      checks: store.urlListChecks,
+      maxAge: relayListMaxAge,
+    );
+    _localLookup = ndkUrlListFn(
+      ndk,
+      checks: store.urlListChecks,
+      offline: true,
+    );
   }
 
   final Ndk ndk;
@@ -68,7 +84,20 @@ class SyncEngine {
 
   final Duration maxBackoff;
 
+  /// Where the relay lists a request reads are looked for, along with the
+  /// write relays of their owner.
+  final Iterable<String> discoveryRelays;
+
+  /// How long a relay list a request reads is trusted. Until then a pass reads
+  /// it from the NDK cache, after that it asks the relays again.
+  final Duration relayListMaxAge;
+
   late final TaskRunner _runner;
+  late final UrlListFn _lookup;
+  late final UrlListFn _localLookup;
+
+  /// Requests reading the same list at once share a single lookup.
+  final _lookups = <String, Future<UrlListLookup>>{};
 
   final _engineStatus = BehaviorSubject<SyncEngineStatus>.seeded(
     const SyncEngineStatus(phase: SyncEnginePhase.stopped),
@@ -130,6 +159,14 @@ class SyncEngine {
   /// within [maxStaleness] rather than the moment it is signed. [refresh] is
   /// there for when that wait is too long.
   SyncHandle ensure(SyncRequest request) {
+    if (request.relays.kinds.contains(UrlListKind.blossom)) {
+      throw ArgumentError.value(
+        request.relays,
+        'relays',
+        'names Blossom servers',
+      );
+    }
+
     final id = request.id ?? _identityOf(request);
     final existing = _registrations[id];
 
@@ -160,10 +197,16 @@ class SyncEngine {
   /// What is already synced for [request], one entry per relay and filter pair
   /// that has coverage. Reads the local state, it never goes to the relays, and
   /// the request does not have to be registered.
-  Future<List<RelayFilterSyncState>> coverageOf(SyncRequest request) async {
+  Future<List<RelayFilterSyncState>> coverageOf(SyncRequest request) async =>
+      _coverageOn(await _localRelayKeysOf(request), request);
+
+  Future<List<RelayFilterSyncState>> _coverageOn(
+    Set<String> relayKeys,
+    SyncRequest request,
+  ) async {
     final states = <RelayFilterSyncState>[];
 
-    for (final relayUrl in _relayKeysOf(request)) {
+    for (final relayUrl in relayKeys) {
       for (final filter in request.filters) {
         final state = await store.readSyncState(
           relayUrl: relayUrl,
@@ -280,7 +323,7 @@ class SyncEngine {
   }
 
   Future<void> _deleteStatesOf(SyncRequest request) async {
-    for (final relayUrl in _relayKeysOf(request)) {
+    for (final relayUrl in await _localRelayKeysOf(request)) {
       for (final filter in request.filters) {
         await store.deleteSyncState(
           relayUrl: relayUrl,
@@ -404,10 +447,21 @@ class SyncEngine {
       return;
     }
 
+    final Set<String> relayKeys;
+    try {
+      relayKeys = await _relayKeysOf(registration.request);
+    } on SyncRelaysUnavailable catch (error) {
+      registration.lastError = error;
+      registration.planned = true;
+      _emit(registration, phase: SyncRequestPhase.failed);
+      return;
+    }
+    registration.relayKeys = relayKeys;
+
     // Waiting on every relay of the request only gates this status update.
     // Each relay keeps draining its own queue meanwhile.
     final outcomes = await Future.wait([
-      for (final relayUrl in _relayKeysOf(registration.request))
+      for (final relayUrl in relayKeys)
         _enqueue(
           relayUrl,
           () => _syncRelay(registration, relayUrl, staleness, startedAt, auth),
@@ -427,7 +481,7 @@ class SyncEngine {
       phase: outcomes.contains(TaskOutcome.answered)
           ? SyncRequestPhase.synced
           : SyncRequestPhase.failed,
-      states: await coverageOf(registration.request),
+      states: await _coverageOn(relayKeys, registration.request),
     );
   }
 
@@ -589,7 +643,7 @@ class SyncEngine {
     queue.retry = Timer(_backoffFor(queue.failures), () {
       queue.retry = null;
       for (final registration in _registrations.values) {
-        if (_relayKeysOf(registration.request).contains(queue.key)) {
+        if (registration.relayKeys.contains(queue.key)) {
           unawaited(_sync(registration.handle.id));
         }
       }
@@ -659,18 +713,60 @@ class SyncEngine {
     final filters = [
       for (final filter in request.filters) _filterIdentity(filter),
     ]..sort();
-    final relays = _relayKeysOf(request).toList()..sort();
 
     return '${filters.join(',')}|${request.authPubkey ?? ''}|'
-        '${relays.join(',')}';
+        '${_setIdentity(request.relays)}';
   }
+
+  /// Order goes where it means nothing, in the urls of an explicit set and the
+  /// members of a union. A fallback keeps it: its order is what it says.
+  String _setIdentity(UrlSet set) => switch (set) {
+    ExplicitUrls(:final urls) =>
+      'explicit(${(_keysOf(urls).toList()..sort()).join(',')})',
+    UnionUrls(:final sets) =>
+      'union(${([for (final s in sets) _setIdentity(s)]..sort()).join(',')})',
+    FallbackUrls(:final sets) =>
+      'fallback(${[for (final s in sets) _setIdentity(s)].join(',')})',
+    _ => jsonEncode(set.toMap()),
+  };
 
   String _filterIdentity(Filter filter) =>
       '${filterFingerprint(filter)}:${filter.since ?? ''}:'
       '${filter.until ?? ''}';
 
-  Set<String> _relayKeysOf(SyncRequest request) => {
-    for (final relay in request.relays) cleanRelayUrl(relay) ?? relay,
+  /// The relays a pass walks, from the lists as they stand now.
+  Future<Set<String>> _relayKeysOf(SyncRequest request) async =>
+      switch (await resolveUrlSet(request.relays, _sharedLookup)) {
+        UrlsResolved(:final urls) => _keysOf(urls),
+        UrlsUnavailable(:final reason) => throw SyncRelaysUnavailable(reason),
+      };
+
+  /// The relays a local question is about. A list never fetched names none:
+  /// nothing can have been synced from it.
+  Future<Set<String>> _localRelayKeysOf(SyncRequest request) async =>
+      switch (await resolveUrlSet(request.relays, _localLookup)) {
+        UrlsResolved(:final urls) => _keysOf(urls),
+        UrlsUnavailable() => const {},
+      };
+
+  Future<UrlListLookup> _sharedLookup(
+    String pubkey,
+    UrlListKind kind,
+    List<String> outboxRelays,
+  ) {
+    final key = '${kind.name}|$pubkey';
+
+    // A block body: returned from the callback, the removed future would be
+    // awaited by itself.
+    return _lookups[key] ??= _lookup(pubkey, kind, outboxRelays).whenComplete(
+      () {
+        _lookups.remove(key);
+      },
+    );
+  }
+
+  Set<String> _keysOf(List<String> urls) => {
+    for (final url in urls) cleanRelayUrl(url) ?? url,
   };
 
   BehaviorSubject<SyncRequestStatus> _subjectFor(SyncHandle handle) {
@@ -716,6 +812,9 @@ class _Registration {
 
   /// Cleared when a pass starts, so a recovered request stops reporting it.
   Object? lastError;
+
+  /// Relays the last pass resolved, the ones a backoff wakes this request for.
+  Set<String> relayKeys = const {};
 }
 
 /// Serialises the work aimed at one relay, and carries that relay's backoff.

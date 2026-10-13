@@ -55,6 +55,12 @@ class MockRelay {
         ...entry.value.keys,
   };
 
+  final List<Filter> _receivedFilters = [];
+
+  /// filters received asking for [kind], whatever came of them
+  int receivedRequests({required int kind}) =>
+      _receivedFilters.where((f) => f.kinds?.contains(kind) ?? false).length;
+
   /// every REQ received per socket, recorded even when the relay refuses it
   final Map<WebSocket, Set<String>> _requestedSubscriptions = {};
 
@@ -485,6 +491,7 @@ class MockRelay {
               _requestedSubscriptions
                   .putIfAbsent(webSocket, () => {})
                   .add(requestId);
+              _receivedFilters.addAll(filters);
 
               final closeMessage = closeRequestsMessage;
               if (closeMessage != null) {

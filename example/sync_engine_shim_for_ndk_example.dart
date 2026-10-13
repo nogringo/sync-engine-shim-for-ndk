@@ -21,7 +21,7 @@ Future<void> main() async {
   final handle = engine.ensure(
     SyncRequest(
       filters: [filter],
-      relays: const ['wss://relay.damus.io', 'wss://nos.lol'],
+      relays: const UrlSet.explicit(['wss://relay.damus.io', 'wss://nos.lol']),
     ),
   );
 
