@@ -458,6 +458,14 @@ class SyncEngine {
     }
     registration.relayKeys = relayKeys;
 
+    if (relayKeys.isEmpty) {
+      // Nothing to read is not a failure. Keep ticking even on closed windows:
+      // the list may name relays later.
+      registration.planned = true;
+      _emit(registration, phase: SyncRequestPhase.synced, states: const []);
+      return;
+    }
+
     // Waiting on every relay of the request only gates this status update.
     // Each relay keeps draining its own queue meanwhile.
     final outcomes = await Future.wait([

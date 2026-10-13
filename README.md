@@ -237,6 +237,11 @@ A list never fetched, while no relay answers, fails the pass with
 `SyncRelaysUnavailable` as `lastError`. The request keeps ticking, and resumes
 once the list comes through.
 
+A set resolving to no relay at all, like an account that never published the
+list, has nothing to read: the pass reports `synced`. The request keeps
+ticking, closed windows included, so it walks the relays once the list names
+some.
+
 `coverageOf` and `forget` stay local: they resolve the set from the NDK cache
 alone. A list never fetched names no relay there, and nothing was synced from it.
 

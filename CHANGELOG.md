@@ -1,3 +1,10 @@
+## 0.9.1
+
+- A set resolving to no relay, like an account without the list it reads, now
+  reports `synced` instead of `failed`. No relay could answer, so the request
+  stayed failed for good. It keeps ticking, closed windows included, and walks
+  the relays once the list names some.
+
 ## 0.9.0
 
 - `SyncRequest.relays` is a `UrlSet` from `url_set_for_ndk`, which this package

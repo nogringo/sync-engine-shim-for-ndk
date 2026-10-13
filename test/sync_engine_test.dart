@@ -1066,6 +1066,48 @@ void main() {
       expect(await cache.loadEvents(kinds: [1]), hasLength(1));
     });
 
+    test('an empty list syncs, and is followed once it names relays', () async {
+      final other = MockRelay(name: 'outbox');
+      await other.startServer();
+      addTearDown(other.stopServer);
+      final at = DateTime.now().subtract(const Duration(hours: 1));
+      await publish(other, 'hello', at: at);
+      engine.start();
+
+      final closed = Filter(
+        kinds: [1],
+        authors: [author.publicKey],
+        until: at.millisecondsSinceEpoch ~/ 1000 + 60,
+      );
+      final handle = engine.ensure(
+        SyncRequest(
+          filters: [closed],
+          relays: UrlSet.outbox(author.publicKey),
+          maxStaleness: const Duration(milliseconds: 50),
+        ),
+      );
+      final status = await settled(handle);
+      expect(status.phase, SyncRequestPhase.synced);
+      expect(status.relayStates, isEmpty);
+
+      await cache.saveEvent(
+        await signer.sign(
+          Nip01Event(
+            pubKey: author.publicKey,
+            kind: Nip65.kKind,
+            tags: [
+              ['r', other.url, 'write'],
+            ],
+            content: '',
+          ),
+        ),
+      );
+      await engine
+          .watchStatus(handle)
+          .firstWhere((status) => status.relayStates.isNotEmpty);
+      expect(await cache.loadEvents(kinds: [1]), hasLength(1));
+    });
+
     test('a list read once is not asked for again while fresh', () async {
       await publishList(Nip65.kKind, [
         ['r', relay.url, 'write'],
